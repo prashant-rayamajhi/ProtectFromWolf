@@ -1,0 +1,82 @@
+# Unreal Engine generated files
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+.vs/
+.vscode/
+*.sln
+*.VC.db
+*.VC.opendb
+*.opensdf
+*.sdf
+*.suo
+*.user
+*.userprefs
+.vsconfig
+*.slo
+*.lo
+*.o
+*.gch
+*.pch
+*.so
+*.dylib
+*.lib
+*.a
+*.out
+*.app
+*.xcodeproj
+*.xcworkspace
+
+# Packaged builds and executables
+Windows/
+Build/
+*.exe
+*.dll
+*.pdb
+*.pak
+*.ucas
+*.utoc
+
+# Assets are intentionally excluded from this code-only portfolio
+Content/
+*.uasset
+*.umap
+*.fbx
+*.obj
+*.wav
+*.mp3
+*.ogg
+*.png
+*.jpg
+*.jpeg
+
+# Large recordings and archives
+*.mp4
+*.mov
+*.avi
+*.mkv
+*.zip
+*.7z
+
+# Local secrets and machine-specific files
+.env
+.env.*
+*.pem
+*.key
+*.pfx
+*.p12
+Config/DefaultEditorPerProjectUserSettings.ini
+
+# Private review material; never publish this directory
+_audit_private/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+*.bak
+*.old
+~$*
+.DS_Store
+Thumbs.db
