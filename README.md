@@ -114,13 +114,6 @@ AI Controller、AI Perception、Behavior Tree、Blackboardを使い、認識と�
 
 詳細は [`docs/CODE_WALKTHROUGH.md`](docs/CODE_WALKTHROUGH.md) にまとめています。
 
-## このリポジトリだけではゲームを起動できません
-
-第三者アセット、Blueprint、マップ、音声、アニメーション、パッケージ済み実行ファイルを含めないため、このリポジトリ単体ではビルドやゲーム起動はできません。動作はプレイ動画と作品紹介資料で確認できる構成にします。
-
-## 使用素材とライセンス
-
-Contentフォルダ内の作成者と再配布条件をファイル単位で確認できていないため、Contentは公開していません。本リポジトリにはオープンソースライセンスを付与しておらず、公開はコードの閲覧と採用選考での説明を目的としています。詳細は [`docs/LICENSE_AND_ASSET_NOTES.md`](docs/LICENSE_AND_ASSET_NOTES.md) を参照してください。
 
 ## English Summary
 
