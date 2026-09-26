@@ -1,4 +1,4 @@
-# PROTECT FROM WOLF - Code Portfolio
+# PROTECT FROM WOLF
 
 > チーム制作物のうち、私の担当範囲を説明するために選定したC++コードだけを掲載しています。ゲーム本体、アセット、担当外または作成者を確認できないコードは含みません。
 
@@ -134,17 +134,9 @@ AI Controller、AI Perception、Behavior Tree、Blackboardを使い、認識と�
 
 射撃処理は一部担当です。入力、照準、弾生成、リロード、UI更新が複数ファイルにまたがり、現存するGit履歴では行単位の作成者を分離できません。そのため、共有ファイル全体を私の成果として掲載しません。担当行をチーム内で確認できた場合のみ、該当部分を抜粋して説明します。
 
-## デバッグとログについて
-
-今回掲載する10ファイルを検査した結果、`UE_LOG`、`UE_CLOG`、画面デバッグ表示は残っていません。そのため、「ログで攻撃選択理由を確認できる仕組み」を完成済みの成果としては記載しません。
 
 現在のコードでは、Blackboard値、Action State、攻撃候補ごとのScore関数を分けているため、ブレークポイントとWatchで条件を段階的に確認できます。今後ログを追加する場合は、Development Build限定のLog Categoryを用意し、候補名、各Score、採用理由、除外理由を1回の判断ごとに出力します。Shipping Buildでは無効化し、プレイ性能と内部情報を守ります。
 
 ## 主要コードの見どころ
 
 詳細は [`docs/CODE_WALKTHROUGH.md`](docs/CODE_WALKTHROUGH.md) にまとめています。
-
-
-## English Summary
-
-This repository contains selected C++ source excerpts from a three-programmer Unreal Engine 5 team project. My scope includes part of the player and shooting integration, transformation, and enemy characters including bosses. Source excerpts cannot be built on their own. Windows game packages, when published, are distributed separately through Releases. Assets and unverified team code are excluded from the source tree.
