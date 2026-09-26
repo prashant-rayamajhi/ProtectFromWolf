@@ -28,9 +28,11 @@
 
 ## ゲームの入手と起動
 
-ゲーム本体の配布先は[GitHub Releases](https://github.com/prashant-rayamajhi/ProtectFromWolf/releases)です。公開済みのWindows版ZIPがある場合は、ZIP全体を展開し、`Windows/ProtectFromWolf.exe`を起動してください。実行ファイルだけを別の場所へ移動せず、Engine・ProtectFromWolfフォルダも一緒に保持してください。
+**[Windows版をダウンロード（2026年9月26日版）](https://github.com/prashant-rayamajhi/ProtectFromWolf/releases/tag/v2026.09.26)**
 
-GitHubの「Code → Download ZIP」はソース紹介資料です。ゲーム本体ではなく、この抜粋だけではビルドも起動もできません。ゲーム本体はチーム制作物・使用素材の配布条件を確認したうえで、ソースとは別に掲載します。
+Assetsの`ProtectFromWolf-Windows-2026.09.26.zip`（約574MB）を選び、ZIP全体を展開して`Windows/ProtectFromWolf.exe`を起動してください。実行ファイルだけを別の場所へ移動せず、Engine・ProtectFromWolfフォルダも一緒に保持してください。
+
+GitHubの「Code → Download ZIP」やリリース欄の「Source code (zip)」はソース紹介資料です。ゲーム本体ではなく、この抜粋だけではビルドも起動もできません。Windowsゲーム本体は、ソースとは別にReleasesへ掲載しています。
 
 ### 基本操作
 
