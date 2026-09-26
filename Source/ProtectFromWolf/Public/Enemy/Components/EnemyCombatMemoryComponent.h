@@ -39,19 +39,19 @@ class PROTECTFROMWOLF_API UEnemyCombatMemoryComponent : public UActorComponent
 
 	bool IsPlayerAiming() const
 	{
-		return b_mPlayerAiming;
+		return m_playerAiming;
 	}
 	bool IsPlayerAttacking() const
 	{
-		return b_mPlayerAttacking;
+		return m_playerAttacking;
 	}
 	bool IsPlayerWerewolf() const
 	{
-		return b_mPlayerWerewolf;
+		return m_playerWerewolf;
 	}
 	bool IsPlayerStationary() const
 	{
-		return b_mPlayerStationary;
+		return m_playerStationary;
 	}
 	bool IsUnderPressure() const
 	{
@@ -115,13 +115,13 @@ class PROTECTFROMWOLF_API UEnemyCombatMemoryComponent : public UActorComponent
 	//ボスが攻撃頻度を調整するためのプレイヤー攻撃圧力
 	float m_pressureThreshold;
 	//可能視認ターゲットかどうか
-	bool b_mCanSeeTarget;
+	bool m_canSeeTarget;
 	//プレイヤー照準中かどうか
-	bool b_mPlayerAiming;
+	bool m_playerAiming;
 	//プレイヤー攻撃中かどうか
-	bool b_mPlayerAttacking;
+	bool m_playerAttacking;
 	//プレイヤー狼男かどうか
-	bool b_mPlayerWerewolf;
+	bool m_playerWerewolf;
 	//プレイヤー静止かどうか
-	bool b_mPlayerStationary;
+	bool m_playerStationary;
 };

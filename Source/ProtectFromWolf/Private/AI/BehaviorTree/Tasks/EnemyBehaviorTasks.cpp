@@ -44,8 +44,8 @@ enum class EEnemyPatrolPhase : uint8
 struct FEnemyPatrolTaskMemory
 {
 	//巡回地点へ到着してから移動を再開するまでの残り秒数
-	float WaitRemaining = 0.f;
-	EEnemyPatrolPhase Phase = EEnemyPatrolPhase::Moving;
+	float m_waitRemaining = 0.f;
+	EEnemyPatrolPhase m_phase = EEnemyPatrolPhase::Moving;
 };
 
 //敵の戦闘ルームタグを取得する関数
@@ -79,7 +79,7 @@ bool SharesCombatGroup(const AEnemyChara *_left, const AEnemyChara *_right)
 bool CanClaimMeleeAttackSlot(AEnemyChara *_enemy)
 {
 	//近接攻撃スロットは、ミニオンランクの敵のみが取得できる
-	if (!_enemy || _enemy->m_EnemyRank != EEnemyRank::Minion) { return true; }
+	if (!_enemy || _enemy->m_enemyRank != EEnemyRank::Minion) { return true; }
 
 	//近接攻撃スロットを取得できるかを判定するために、同じ戦闘グループに属する他の敵の数をカウントする
 	int32 committedMeleeAttackers = 0;
@@ -89,8 +89,8 @@ bool CanClaimMeleeAttackSlot(AEnemyChara *_enemy)
 		//同じ戦闘グループに属する敵の中で、近接攻撃を行っている敵の数をカウントする
 		AEnemyChara *peer = *iterator;
 		//死亡済み、自身、別の攻撃方式、別戦闘空間の敵を集計から除外する
-		if (!IsValid(peer) || peer == _enemy || peer->GetHealthRatio() <= 0.f || peer->m_EnemyRank != EEnemyRank::Minion ||
-			peer->m_CurrentStyle != EEnemyAttackStyle::Melee || !SharesCombatGroup(_enemy, peer))
+		if (!IsValid(peer) || peer == _enemy || peer->GetHealthRatio() <= 0.f || peer->m_enemyRank != EEnemyRank::Minion ||
+			peer->m_currentStyle != EEnemyAttackStyle::Melee || !SharesCombatGroup(_enemy, peer))
 		{
 			continue;
 		}
@@ -108,21 +108,21 @@ bool WantsTacticalReload(AEnemyChara *_enemy)
 	AEnemyGun *gun = _enemy ? _enemy->GetCurrentGun() : nullptr;
 
 	//銃を持っていない、または銃の攻撃スタイルがGunでない、または弾薬が0以下の場合、戦術的リロードを希望しないと判定する
-	if (!gun || _enemy->m_CurrentStyle != EEnemyAttackStyle::Gun || gun->GetTotalAmmo() <= 0) { return false; }
+	if (!gun || _enemy->m_currentStyle != EEnemyAttackStyle::Gun || gun->GetTotalAmmo() <= 0) { return false; }
 
 	//銃の弾薬が0の場合、戦術的リロードを希望する
 	if (gun->IsOutOfAmmo()) { return true; }
 
 	//ミニオンランクの敵は戦術的リロードを希望しない
-	if (_enemy->m_EnemyRank == EEnemyRank::Minion) { return false; }
+	if (_enemy->m_enemyRank == EEnemyRank::Minion) { return false; }
 
 	//銃の弾薬が少ない場合、戦術的リロードを希望する
-	const bool b_isLowAmmo = gun->GetCurrentAmmo() <= FMath::Max(1, gun->GetClipSize() / 4);
+	const bool isLowAmmo = gun->GetCurrentAmmo() <= FMath::Max(1, gun->GetClipSize() / 4);
 	//安全距離とプレッシャー状態を確認する戦闘記憶コンポーネント
 	const UEnemyCombatMemoryComponent *memory = _enemy->m_combatMemoryComponent;
 
 	//弾薬が少なく、戦闘メモリが存在し、ターゲットとの距離が安全なリロード距離以上であり、プレッシャーを受けていない場合、戦術的リロードを希望する
-	return b_isLowAmmo && memory && memory->GetTargetDistance() >= BossSafeReloadDistance && !memory->IsUnderPressure();
+	return isLowAmmo && memory && memory->GetTargetDistance() >= BossSafeReloadDistance && !memory->IsUnderPressure();
 }
 
 //敵がカバー移動を要求している場合、AIコントローラーにカバー移動を指示する関数
@@ -152,7 +152,7 @@ bool HandleTacticalReload(AAIController *_controller, AEnemyChara *_enemy, AActo
 	//コンバットコンポネントのプレッシャー状態を確認し、必要に応じて武器を切り替える
 	UEnemyCombatMemoryComponent *memory = _enemy->m_combatMemoryComponent;
 	//プレッシャーを受けたボスは距離に応じて近接またはレーザーへ切り替える
-	if (_enemy->m_EnemyRank != EEnemyRank::Minion && memory && memory->IsUnderPressure())
+	if (_enemy->m_enemyRank != EEnemyRank::Minion && memory && memory->IsUnderPressure())
 	{
 		_enemy->SwitchWeapon(memory->GetTargetDistance() <= BossSafeReloadDistance ? EEnemyAttackStyle::Melee : EEnemyAttackStyle::Laser);
 		return true;
@@ -216,8 +216,8 @@ bool FindMeleeFormationPosition(AEnemyChara *_enemy, AActor *_target, FVector &_
 		//近接陣形の並び順を比較する同じ戦闘グループの敵
 		AEnemyChara *peer = *iterator;
 		//死亡済みまたは別戦闘グループの敵を近接陣形から除外する
-		if (!IsValid(peer) || peer->GetHealthRatio() <= 0.f || peer->m_EnemyRank != EEnemyRank::Minion ||
-			peer->m_CurrentStyle != EEnemyAttackStyle::Melee || !SharesCombatGroup(_enemy, peer) ||
+		if (!IsValid(peer) || peer->GetHealthRatio() <= 0.f || peer->m_enemyRank != EEnemyRank::Minion ||
+			peer->m_currentStyle != EEnemyAttackStyle::Melee || !SharesCombatGroup(_enemy, peer) ||
 			FVector::DistSquared2D(peer->GetActorLocation(), _target->GetActorLocation()) > FMath::Square(4500.f))
 		{
 			continue;
@@ -264,8 +264,8 @@ bool FindRangedFormationPosition(AEnemyChara *_enemy, AActor *_target, FVector &
 		//遠距離陣形の並び順を比較する同じ戦闘グループの敵
 		AEnemyChara *peer = *iterator;
 		//死亡済みまたは別戦闘グループの敵を遠距離陣形から除外する
-		if (!IsValid(peer) || peer->GetHealthRatio() <= 0.f || peer->m_EnemyRank != EEnemyRank::Minion ||
-			peer->m_CurrentStyle != EEnemyAttackStyle::Gun || !SharesCombatGroup(_enemy, peer) ||
+		if (!IsValid(peer) || peer->GetHealthRatio() <= 0.f || peer->m_enemyRank != EEnemyRank::Minion ||
+			peer->m_currentStyle != EEnemyAttackStyle::Gun || !SharesCombatGroup(_enemy, peer) ||
 			FVector::DistSquared2D(peer->GetActorLocation(), _target->GetActorLocation()) > FMath::Square(5000.f))
 		{
 			continue;
@@ -325,7 +325,7 @@ EBTNodeResult::Type UBTTask_EnemyAttack::ExecuteTask(UBehaviorTreeComponent &_ow
 	enemy->StopCombatIdleAnimation();
 
 	//ミニオンランクの敵で、銃攻撃スタイルを持ち、カバーコンポーネントが存在し、カバーを使用している場合の処理
-	if (enemy->m_EnemyRank == EEnemyRank::Minion && enemy->m_CurrentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
+	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
 		enemy->m_coverComponent->IsUsingCover())
 	{
 		//カバーを使用している場合、カバー位置に到達していない場合はカバー移動を指示する
@@ -355,7 +355,7 @@ EBTNodeResult::Type UBTTask_EnemyAttack::ExecuteTask(UBehaviorTreeComponent &_ow
 		else { enemy->m_coverComponent->FinishCoverUse(); }
 	}
 	//ミニオンランクの敵で、銃攻撃スタイルを持ち、カバーコンポーネントが存在し、カバーを使用していない場合の処理
-	if (enemy->m_EnemyRank == EEnemyRank::Minion && enemy->m_CurrentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
+	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
 		!enemy->m_coverComponent->IsUsingCover() && enemy->m_combatMemoryComponent && enemy->m_combatMemoryComponent->GetTargetDistance() > 850.f &&
 		(enemy->m_combatMemoryComponent->IsPlayerAiming() || enemy->m_combatMemoryComponent->IsPlayerAttacking() ||
 		 enemy->m_combatMemoryComponent->IsUnderPressure()))
@@ -386,9 +386,9 @@ EBTNodeResult::Type UBTTask_EnemyAttack::ExecuteTask(UBehaviorTreeComponent &_ow
 	enemy->FaceTarget(targetActor);
 
 	//近接攻撃へ参加できる空きがあるか判定するための変数
-	const bool b_hasMeleeAttackSlot = CanClaimMeleeAttackSlot(enemy);
+	const bool hasMeleeAttackSlot = CanClaimMeleeAttackSlot(enemy);
 	//近接攻撃枠を取得できない敵を空いている支援位置へ移動させる
-	if (enemy->m_CurrentStyle == EEnemyAttackStyle::Melee && !b_hasMeleeAttackSlot)
+	if (enemy->m_currentStyle == EEnemyAttackStyle::Melee && !hasMeleeAttackSlot)
 	{
 		//近接攻撃役と重ならない遠距離支援位置
 		FVector supportPosition;
@@ -400,7 +400,7 @@ EBTNodeResult::Type UBTTask_EnemyAttack::ExecuteTask(UBehaviorTreeComponent &_ow
 		return EBTNodeResult::Succeeded;
 	}
 	//近接攻撃スタイルの敵で、近接攻撃を実行できない場合、ターゲットに向かって移動を指示する
-	if (enemy->m_CurrentStyle == EEnemyAttackStyle::Melee && !enemy->CanCommitMeleeAttack(targetActor))
+	if (enemy->m_currentStyle == EEnemyAttackStyle::Melee && !enemy->CanCommitMeleeAttack(targetActor))
 	{
 		controller->MoveToActor(targetActor, enemy->GetMeleeStrikeRange(targetActor) * TargetAcceptanceRadiusMultiplier, true, true, true, nullptr,
 								true);
@@ -409,16 +409,16 @@ EBTNodeResult::Type UBTTask_EnemyAttack::ExecuteTask(UBehaviorTreeComponent &_ow
 	//遠距離攻撃スタイルの敵で、遠距離攻撃を実行できない場合、遠距離フォーメーション位置を検索し、移動を指示する
 	controller->StopMovement();
 	//Decision Componentが選択した攻撃を開始できたか示す変数
-	bool b_executedAttack = false;
+	bool executedAttack = false;
 	//戦況判断用コンポーネントがある場合は選択済みの攻撃を実行する
-	if (enemy->m_decisionComponent) { b_executedAttack = enemy->m_decisionComponent->ExecuteAttack(); }
+	if (enemy->m_decisionComponent) { executedAttack = enemy->m_decisionComponent->ExecuteAttack(); }
 	else
 	{
 		enemy->PerformAttack();
-		b_executedAttack = true;
+		executedAttack = true;
 	}
 	//プレッシャーで攻撃できなかった敵を射線外へ退避させる
-	if (!b_executedAttack && enemy->m_coverComponent && enemy->m_combatMemoryComponent && enemy->m_combatMemoryComponent->IsUnderPressure())
+	if (!executedAttack && enemy->m_coverComponent && enemy->m_combatMemoryComponent && enemy->m_combatMemoryComponent->IsUnderPressure())
 	{
 		//プレイヤーの照準から外れるために使用する回避先
 		FVector dodgeLocation;
@@ -459,16 +459,16 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 	if (enemyController && !enemyController->HasActiveVisualContact())
 	{
 		//敵のAIコントローラーが最近の視覚的接触またはプレイヤーのノイズを持っていない場合、ターゲットアクターの位置を通知する
-		bool b_hasKnownLocation = enemyController->HasRecentVisualContact() || enemyController->HasRecentPlayerNoise();
+		bool hasKnownLocation = enemyController->HasRecentVisualContact() || enemyController->HasRecentPlayerNoise();
 		//戦闘開始直後のArena内では現在のプレイヤー位置を認識情報へ補う
-		if (!b_hasKnownLocation && enemy->Tags.ContainsByPredicate([](const FName &_tag) { return _tag.ToString().StartsWith(TEXT("CombatRoom_")); }))
+		if (!hasKnownLocation && enemy->Tags.ContainsByPredicate([](const FName &_tag) { return _tag.ToString().StartsWith(TEXT("CombatRoom_")); }))
 		{
 			//敵のAIコントローラーにターゲットアクターの位置を通知する
 			enemyController->NotifyPlayerNoise(targetActor, targetActor->GetActorLocation());
-			b_hasKnownLocation = true;
+			hasKnownLocation = true;
 		}
 		//敵のAIコントローラーが既知の位置を持っている場合、フォーカスをクリアし、最近の視覚的接触またはプレイヤーのノイズの位置に移動する
-		if (b_hasKnownLocation)
+		if (hasKnownLocation)
 		{
 			controller->ClearFocus(EAIFocusPriority::Gameplay);
 			controller->MoveToLocation(enemyController->GetLastKnownPlayerLocation(), 90.f, true, true, true, true);
@@ -478,7 +478,7 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 	//敵の戦闘アイドルアニメーションを停止する
 	enemy->StopCombatIdleAnimation();
 	//遮蔽物を使用中の遠距離ミニオンを確保済みの位置まで移動させる
-	if (enemy->m_EnemyRank == EEnemyRank::Minion && enemy->m_CurrentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
+	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
 		enemy->m_coverComponent->IsUsingCover())
 	{
 		//カバーを使用している場合、カバー位置に到達していない場合はカバー移動を指示する
@@ -510,7 +510,7 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 	controller->SetFocus(targetActor);
 
 	//ミニオンランクの敵で、銃攻撃スタイルを持ち、カバーコンポーネントが存在し、カバーを使用していない場合の処理
-	if (enemy->m_EnemyRank == EEnemyRank::Minion && enemy->m_CurrentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
+	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
 		!enemy->m_coverComponent->IsUsingCover() && enemy->m_combatMemoryComponent && enemy->m_combatMemoryComponent->GetTargetDistance() > 850.f &&
 		(enemy->m_combatMemoryComponent->IsPlayerAiming() || enemy->m_combatMemoryComponent->IsPlayerAttacking() ||
 		 enemy->m_combatMemoryComponent->IsUnderPressure()))
@@ -528,7 +528,6 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 			{
 				//AIコントローラーにカバー移動を指示する
 				const EPathFollowingRequestResult::Type moveResult = controller->MoveToLocation(coverLocation, 35.f, true, true, true, true);
-				//Behavior Tree Taskの成否を確定するため、処理結果の状態を確認する
 				if (moveResult == EPathFollowingRequestResult::Failed) { enemy->m_coverComponent->FinishCoverUse(); }
 			}
 			return EBTNodeResult::Succeeded;
@@ -548,14 +547,14 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 	//近接ミニオンをプレイヤー周囲へ分散させるための陣形位置
 	FVector formationPosition;
 	//有効な近接陣形位置を取得できた場合は攻撃距離まで移動する
-	if (enemy->m_EnemyRank == EEnemyRank::Minion && enemy->m_CurrentStyle == EEnemyAttackStyle::Melee &&
+	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Melee &&
 		FindMeleeFormationPosition(enemy, targetActor, formationPosition))
 	{
 		controller->MoveToLocation(formationPosition, 45.f, true, true, true, true);
 		return EBTNodeResult::Succeeded;
 	}
 	//有効な射撃陣形位置を取得できた場合は他の敵と重ならない位置へ移動する
-	if (enemy->m_EnemyRank == EEnemyRank::Minion && enemy->m_CurrentStyle == EEnemyAttackStyle::Gun &&
+	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Gun &&
 		FindRangedFormationPosition(enemy, targetActor, formationPosition))
 	{
 		controller->MoveToLocation(formationPosition, 100.f, true, true, true, true);
@@ -564,7 +563,7 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 
 	//AIコントローラーにターゲットアクターに移動するよう指示する
 	controller->MoveToActor(targetActor,
-							(enemy->m_CurrentStyle == EEnemyAttackStyle::Melee ? enemy->GetMeleeStrikeRange(targetActor) : enemy->GetAttackRange()) *
+							(enemy->m_currentStyle == EEnemyAttackStyle::Melee ? enemy->GetMeleeStrikeRange(targetActor) : enemy->GetAttackRange()) *
 								TargetAcceptanceRadiusMultiplier,
 							true, true, true, nullptr, true);
 	return EBTNodeResult::Succeeded;
@@ -606,7 +605,7 @@ EBTNodeResult::Type UBTTask_EnemyPatrol::ExecuteTask(UBehaviorTreeComponent &_ow
 	//ナビゲーションシステムを使用して、ランダムな巡回位置を取得する
 	FNavLocation patrolLocation;
 	//距離条件を満たす巡回地点をNavMesh上で発見したか示す変数
-	bool b_foundPatrolLocation = false;
+	bool foundPatrolLocation = false;
 	//距離条件を満たす候補が見つかるまで上限回数内で探索する
 	for (int32 attempt = 0; attempt < MaxPatrolCandidateAttempts; ++attempt)
 	{
@@ -625,7 +624,7 @@ EBTNodeResult::Type UBTTask_EnemyPatrol::ExecuteTask(UBehaviorTreeComponent &_ow
 
 		//他の敵キャラクターとの距離を確認し、最小距離 MinPatrolPeerDistance
 		//より近い場合は候補を破棄する
-		bool b_tooCloseToPeer = false;
+		bool tooCloseToPeer = false;
 		//候補地点と同じ戦闘空間の敵との距離を確認する
 		for (TActorIterator<AEnemyChara> it(enemyPawn->GetWorld()); it; ++it)
 		{
@@ -634,20 +633,20 @@ EBTNodeResult::Type UBTTask_EnemyPatrol::ExecuteTask(UBehaviorTreeComponent &_ow
 			//別の敵に近すぎる候補を選択不可として記録する
 			if (FVector::DistSquared2D(candidate.Location, it->GetActorLocation()) < FMath::Square(MinPatrolPeerDistance))
 			{
-				b_tooCloseToPeer = true;
+				tooCloseToPeer = true;
 				break;
 			}
 		}
 
 		//候補が他の敵キャラクターに近すぎる場合は、次の候補を試す
-		if (b_tooCloseToPeer) { continue; }
+		if (tooCloseToPeer) { continue; }
 		patrolLocation = candidate;
-		b_foundPatrolLocation = true;
+		foundPatrolLocation = true;
 		break;
 	}
 
 	//有効な巡回位置が見つからなかった場合、タスクを失敗として終了する
-	if (!b_foundPatrolLocation) { return EBTNodeResult::Failed; }
+	if (!foundPatrolLocation) { return EBTNodeResult::Failed; }
 
 	//ブラックボードコンポーネントに巡回位置を設定し、AIコントローラーのフォーカスをクリアする
 	if (blackboard) { blackboard->SetValueAsVector(EnemyBlackboardKeys::PatrolLocation, patrolLocation.Location); }
@@ -656,8 +655,8 @@ EBTNodeResult::Type UBTTask_EnemyPatrol::ExecuteTask(UBehaviorTreeComponent &_ow
 	controller->ClearFocus(EAIFocusPriority::Gameplay);
 	//巡回の移動段階と待機時間をTask実行中に保持するメモリ
 	FEnemyPatrolTaskMemory *memory = reinterpret_cast<FEnemyPatrolTaskMemory *>(_nodeMemory);
-	memory->Phase = EEnemyPatrolPhase::Moving;
-	memory->WaitRemaining = PatrolIdleDuration;
+	memory->m_phase = EEnemyPatrolPhase::Moving;
+	memory->m_waitRemaining = PatrolIdleDuration;
 	const EPathFollowingRequestResult::Type moveResult = controller->MoveToLocation(patrolLocation.Location, 50.f, true, true, true, true);
 
 	//移動要求の結果に応じて、タスクの結果を返す
@@ -666,7 +665,7 @@ EBTNodeResult::Type UBTTask_EnemyPatrol::ExecuteTask(UBehaviorTreeComponent &_ow
 	//移動要求がすでに目標に到達している場合、巡回フェーズを待機に設定し、敵のアクション状態をアイドルに設定する
 	if (moveResult == EPathFollowingRequestResult::AlreadyAtGoal)
 	{
-		memory->Phase = EEnemyPatrolPhase::Waiting;
+		memory->m_phase = EEnemyPatrolPhase::Waiting;
 		//敵本体を取得できた場合は到着直後から待機姿勢へ切り替える
 		if (enemy) enemy->SetActionState(EActionState::Idle);
 	}
@@ -690,7 +689,7 @@ void UBTTask_EnemyPatrol::TickTask(UBehaviorTreeComponent &_ownerComp, uint8 *_n
 	//敵が移動中の場合、移動が完了するまで待機する
 	FEnemyPatrolTaskMemory *memory = reinterpret_cast<FEnemyPatrolTaskMemory *>(_nodeMemory);
 	//移動段階では経路追従の完了を待ってから待機段階へ切り替える
-	if (memory->Phase == EEnemyPatrolPhase::Moving)
+	if (memory->m_phase == EEnemyPatrolPhase::Moving)
 	{
 		//経路追従中はTaskを継続して次のTickを待つ
 		if (controller->GetMoveStatus() == EPathFollowingStatus::Moving) { return; }
@@ -701,8 +700,8 @@ void UBTTask_EnemyPatrol::TickTask(UBehaviorTreeComponent &_ownerComp, uint8 *_n
 		enemy->StopFiring();
 		enemy->LowerWeapon();
 		enemy->SetActionState(EActionState::Idle);
-		memory->Phase = EEnemyPatrolPhase::Waiting;
-		memory->WaitRemaining = PatrolIdleDuration;
+		memory->m_phase = EEnemyPatrolPhase::Waiting;
+		memory->m_waitRemaining = PatrolIdleDuration;
 		return;
 	}
 
@@ -717,9 +716,9 @@ void UBTTask_EnemyPatrol::TickTask(UBehaviorTreeComponent &_ownerComp, uint8 *_n
 	}
 
 	//待機時間を減算し、待機時間が終了した場合はタスクを成功として終了する
-	memory->WaitRemaining -= _deltaSeconds;
+	memory->m_waitRemaining -= _deltaSeconds;
 	//三秒間の待機が完了した時点で次の巡回選択へ進める
-	if (memory->WaitRemaining <= 0.f)
+	if (memory->m_waitRemaining <= 0.f)
 	{
 		FinishLatentTask(_ownerComp, EBTNodeResult::Succeeded);
 	}

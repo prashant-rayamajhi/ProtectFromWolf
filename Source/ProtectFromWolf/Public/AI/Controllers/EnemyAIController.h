@@ -44,7 +44,7 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 
 	bool IsUsingBehaviorTree() const
 	{
-		return b_mUsingBehaviorTree;
+		return m_usingBehaviorTree;
 	}
 
 	//ダメージを受けた際の通知関数
@@ -61,7 +61,7 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	void UpdateVisualContact(AActor *_player, bool _canSee, const FVector &_location);
 	bool HasActiveVisualContact() const
 	{
-		return b_mHasActiveVisualContact;
+		return m_hasActiveVisualContact;
 	}
 	//直近の視覚接触があるか判定する関数
 	bool HasRecentVisualContact(float _memorySeconds = 5.f) const;
@@ -105,7 +105,7 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	AActor *m_targetActor;
 
 	//操作対象の敵キャラクター
-	AEnemyChara *m_pEnemy;
+	AEnemyChara *m_enemy;
 
 	//巡回と追跡と戦闘を切り替える現在のAI状態
 	EAIState m_currentState;
@@ -144,7 +144,7 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	UAISenseConfig_Hearing *m_hearingConfig;
 
 	//行動判断をBehavior Treeへ任せているか示す変数
-	bool b_mUsingBehaviorTree;
+	bool m_usingBehaviorTree;
 
 	//適応近接攻撃距離
 	float m_adaptiveMeleeDist;
@@ -162,10 +162,10 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	float m_losCheckInterval;
 
 	//最後の可能視認プレイヤーかどうか
-	bool m_bLastCanSeePlayer;
+	bool m_lastCanSeePlayer;
 
 	//武器構え済みかどうか
-	bool m_bWeaponDrawn;
+	bool m_weaponDrawn;
 
 	//遠距離敵が次の横移動を選ぶまでの待機タイマー
 	float m_strafeTimer;
@@ -177,7 +177,7 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	float m_currentStrafeDir;
 
 	//攻撃再使用待ち時間かどうか
-	bool m_bIsAttackCooldown;
+	bool m_isAttackCooldown;
 
 	//次の攻撃判断を許可するまでの待機時間を管理するタイマー
 	FTimerHandle m_attackCooldownTimerHandle;
@@ -186,10 +186,10 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	float m_bossModeTimer;
 
 	//近接攻撃モードかどうか
-	bool m_bIsMeleeMode;
+	bool m_isMeleeMode;
 
 	//実行中終了後弾薬レーザーかどうか
-	bool m_bDoingPostAmmoLaser;
+	bool m_doingPostAmmoLaser;
 
 	//最後のプレイヤー音時刻
 	float m_lastPlayerNoiseTime;
@@ -200,7 +200,7 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	//最後の視覚接触位置
 	FVector m_lastVisualContactLocation;
 	//保持有効視覚接触かどうか
-	bool b_mHasActiveVisualContact;
+	bool m_hasActiveVisualContact;
 	//次の知覚更新時刻
 	float m_btPerceptionRefreshTime;
 	//次の待機復帰時刻

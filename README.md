@@ -8,7 +8,7 @@
 
 - 制作期間: 約3か月（2025年11月20日 - 2026年2月13日）
 - 制作体制: チーム制作（プログラマー3名）
-- 使用技術: Unreal Engine 5 / C++
+- 使用技術: Unreal Engine 5 / C++（現在の改修版はUE 5.7.4）
 - 公開範囲: 担当を確認したC++コードと説明資料のみ
 - プレイ動画: [Google Driveで見る](https://drive.google.com/file/d/1TVYpkikDlaY0mise30JveE5y7Ndnf8Xr/view?usp=drive_link)
 - 作品資料: [Google Driveで見る](https://drive.google.com/drive/folders/1lv9nxbNX8tpTkDl2XpudB7sLtmPInEcj)
@@ -16,6 +16,36 @@
 ### 制作後の改修について
 
 手元のソースには、制作期間終了後に行った不具合修正、責務分割、コメント整理が含まれます。応募時には制作期間中の実装と、その後のポートフォリオ向け改修を区別して説明します。
+
+### 2026年9月26日の更新
+
+- 公開済みの主要5実装・10ファイルを、UE 5.7移行後の開発プロジェクトと一致させました。
+- メンバー変数は`m_`、引数は`_`で始める命名へ整理しました。エンジンが定義する名前は維持しています。
+- 変身に必要なメッシュ・アニメーション・コンポーネントの確認を追加し、不足した状態での切り替えを防いでいます。
+- ゲーム側ではタイトルの歩行演出、人物を回り込むカメラ、TPSからFPSへの接続も更新しています。この演出用コードは、従来の担当範囲の抜粋には含めていません。
+
+パッケージ作成と実画面での確認範囲は[更新・確認記録](docs/RELEASE_20260926.md)に記載しています。全戦闘の通し検証を完了したという意味ではありません。
+
+## ゲームの入手と起動
+
+ゲーム本体の配布先は[GitHub Releases](https://github.com/prashant-rayamajhi/ProtectFromWolf/releases)です。公開済みのWindows版ZIPがある場合は、ZIP全体を展開し、`Windows/ProtectFromWolf.exe`を起動してください。実行ファイルだけを別の場所へ移動せず、Engine・ProtectFromWolfフォルダも一緒に保持してください。
+
+GitHubの「Code → Download ZIP」はソース紹介資料です。ゲーム本体ではなく、この抜粋だけではビルドも起動もできません。ゲーム本体はチーム制作物・使用素材の配布条件を確認したうえで、ソースとは別に掲載します。
+
+### 基本操作
+
+| 操作 | キーボード・マウス | コントローラー（Xbox表記） |
+| --- | --- | --- |
+| 移動 | W / A / S / D | 左スティック |
+| 視点 | マウス | 右スティック |
+| 射撃・人狼の攻撃 | 左クリック | RT |
+| 照準 | 右クリック | LT |
+| リロード | R | X |
+| ジャンプ | Space | A |
+| 変身 | 左Shift | RB |
+| ジャスト回避 | 左Alt | B |
+
+変身はゲージ、ジャスト回避は回避可能なタイミングが必要です。操作表は入力設定を確認したものです。実コントローラーでの操作感は未検証です。
 
 ## 私の担当範囲
 
@@ -106,7 +136,7 @@ AI Controller、AI Perception、Behavior Tree、Blackboardを使い、認識と�
 
 ## デバッグとログについて
 
-現行ソースを検査した結果、`UE_LOG`、`UE_CLOG`、画面デバッグ表示は残っていません。そのため、「ログで攻撃選択理由を確認できる仕組み」を完成済みの成果としては記載しません。
+今回掲載する10ファイルを検査した結果、`UE_LOG`、`UE_CLOG`、画面デバッグ表示は残っていません。そのため、「ログで攻撃選択理由を確認できる仕組み」を完成済みの成果としては記載しません。
 
 現在のコードでは、Blackboard値、Action State、攻撃候補ごとのScore関数を分けているため、ブレークポイントとWatchで条件を段階的に確認できます。今後ログを追加する場合は、Development Build限定のLog Categoryを用意し、候補名、各Score、採用理由、除外理由を1回の判断ごとに出力します。Shipping Buildでは無効化し、プレイ性能と内部情報を守ります。
 
@@ -117,4 +147,4 @@ AI Controller、AI Perception、Behavior Tree、Blackboardを使い、認識と�
 
 ## English Summary
 
-This is a code-only portfolio for a three-programmer Unreal Engine 5 team project. It focuses on my declared areas: part of the player character, human/werewolf transformation, part of the shooting integration, and enemy characters including bosses. Assets and unverified team code are intentionally excluded. The repository is not a playable build.
+This repository contains selected C++ source excerpts from a three-programmer Unreal Engine 5 team project. My scope includes part of the player and shooting integration, transformation, and enemy characters including bosses. Source excerpts cannot be built on their own. Windows game packages, when published, are distributed separately through Releases. Assets and unverified team code are excluded from the source tree.

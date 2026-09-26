@@ -49,9 +49,9 @@ class PROTECTFROMWOLF_API UEnemyDecisionComponent : public UActorComponent
 	//ボス近接攻撃距離かどうか
 	float m_bossMeleeDistance;
 	//攻撃形式設定初期化済みかどうか
-	bool b_mStyleProfileInitialized;
+	bool m_styleProfileInitialized;
 	//使用回数適応攻撃形式かどうか
-	bool b_mUsesAdaptiveStyle;
+	bool m_usesAdaptiveStyle;
 	//次のボス行動時刻
 	float m_nextBossActionTime;
 	//ラストボスが前回選択した攻撃行動

@@ -61,7 +61,7 @@ int32 CountNearbyCombatAllies(const AEnemyChara *_boss)
 		//周囲判定の対象となる敵
 		const AEnemyChara *ally = *iterator;
 		//無効な敵、ボス自身、死亡済みの敵、ボスRankを人数から除外する
-		if (!IsValid(ally) || ally == _boss || ally->GetHealthRatio() <= 0.f || ally->m_EnemyRank != EEnemyRank::Minion) { continue; }
+		if (!IsValid(ally) || ally == _boss || ally->GetHealthRatio() <= 0.f || ally->m_enemyRank != EEnemyRank::Minion) { continue; }
 
 		//同じ戦闘空間に相当する距離内の雑魚敵だけを人数へ加える
 		if (FVector::DistSquared2D(_boss->GetActorLocation(), ally->GetActorLocation()) <= FMath::Square(5000.f)) { ++allyCount; }
@@ -74,7 +74,7 @@ int32 CountNearbyCombatAllies(const AEnemyChara *_boss)
 //EnemyDecisionComponentが使用するComponentと初期値を構築する関数
 UEnemyDecisionComponent::UEnemyDecisionComponent()
 	: m_enemy(nullptr), m_styleDecisionTime(0.f), m_adaptiveMeleeDistance(200.f), m_bossMeleeDistance(BossMeleeDistance),
-	  b_mStyleProfileInitialized(false), b_mUsesAdaptiveStyle(false), m_nextBossActionTime(0.f), m_lastBossAction(NAME_None)
+	  m_styleProfileInitialized(false), m_usesAdaptiveStyle(false), m_nextBossActionTime(0.f), m_lastBossAction(NAME_None)
 {
 	//このコンポーネントは毎フレームの更新を必要としないため、Tickを無効化する
 	PrimaryComponentTick.bCanEverTick = false;
@@ -89,7 +89,7 @@ void UEnemyDecisionComponent::UpdateDecision(float _deltaTime, float _targetDist
 	if (!m_enemy || m_enemy->IsAttacking() || m_enemy->IsReloading()) { return; }
 
 	//敵のランクがミニオンの場合、Adaptive Styleを更新する
-	if (m_enemy->m_EnemyRank == EEnemyRank::Minion)
+	if (m_enemy->m_enemyRank == EEnemyRank::Minion)
 	{
 		UpdateAdaptiveStyle(_targetDistance);
 		return;
@@ -108,7 +108,7 @@ bool UEnemyDecisionComponent::ExecuteAttack()
 	if (!m_enemy || m_enemy->IsAttacking() || m_enemy->IsReloading()) { return false; }
 
 	//敵のランクがミニオンの場合、通常攻撃を実行する
-	if (m_enemy->m_EnemyRank == EEnemyRank::Minion)
+	if (m_enemy->m_enemyRank == EEnemyRank::Minion)
 	{
 		m_enemy->PerformAttack();
 		return true;
@@ -129,7 +129,7 @@ bool UEnemyDecisionComponent::ExecuteAttack()
 	//戦況から特殊攻撃へ置き換える前の基本行動
 	FName selectedAction = BasicAttackAction;
 	//中間ボスは変身、攻撃、照準、静止へ対抗する特殊攻撃を選ぶ
-	if (memory && m_enemy->m_EnemyRank == EEnemyRank::MiddleBoss)
+	if (memory && m_enemy->m_enemyRank == EEnemyRank::MiddleBoss)
 	{
 		//近距離で攻め続けるプレイヤーには地面叩きつけで反撃する
 		if ((memory->IsPlayerWerewolf() || memory->IsUnderPressure() || memory->IsPlayerAttacking()) && distance <= BossFarDistance &&
@@ -143,14 +143,14 @@ bool UEnemyDecisionComponent::ExecuteAttack()
 			selectedAction = LeapAction;
 		}
 		//離れて静止するプレイヤーには連続射撃で移動を促す
-		else if (memory->IsPlayerStationary() && distance > BossMeleeDistance && m_enemy->m_CurrentStyle == EEnemyAttackStyle::Gun &&
+		else if (memory->IsPlayerStationary() && distance > BossMeleeDistance && m_enemy->m_currentStyle == EEnemyAttackStyle::Gun &&
 				 memory->CanUseAction(BarrageAction, BarrageCooldown))
 		{
 			selectedAction = BarrageAction;
 		}
 	}
 	//ラストボスは味方との連携とTeleportを含む攻撃候補から選ぶ
-	if (memory && m_enemy->m_EnemyRank == EEnemyRank::LastBoss)
+	if (memory && m_enemy->m_enemyRank == EEnemyRank::LastBoss)
 	{
 		//近距離の狼男には地面叩きつけで接近戦を拒否する
 		if (memory->IsPlayerWerewolf() && distance <= BossMeleeDistance && memory->CanUseAction(SmashAction, SmashCooldown))
@@ -169,7 +169,7 @@ bool UEnemyDecisionComponent::ExecuteAttack()
 			selectedAction = AmbushAction;
 		}
 		//雑魚敵が交戦中なら別方向から連続射撃を重ねる
-		else if (nearbyAllies > 0 && distance > BossMeleeDistance && m_enemy->m_CurrentStyle == EEnemyAttackStyle::Gun &&
+		else if (nearbyAllies > 0 && distance > BossMeleeDistance && m_enemy->m_currentStyle == EEnemyAttackStyle::Gun &&
 				 memory->CanUseAction(BarrageAction, BarrageCooldown))
 		{
 			selectedAction = BarrageAction;
@@ -182,7 +182,7 @@ bool UEnemyDecisionComponent::ExecuteAttack()
 	}
 
 	//近接Styleで特殊行動が未選択の場合は戦況に合う近接攻撃を補う
-	if (selectedAction == BasicAttackAction && m_enemy->m_CurrentStyle == EEnemyAttackStyle::Melee)
+	if (selectedAction == BasicAttackAction && m_enemy->m_currentStyle == EEnemyAttackStyle::Melee)
 	{
 		//プレイヤーが狼男で、SmashActionが使用可能な場合、SmashActionを選択する
 		if (memory && memory->IsPlayerWerewolf() && memory->CanUseAction(SmashAction, SmashCooldown)) { selectedAction = SmashAction; }
@@ -192,7 +192,7 @@ bool UEnemyDecisionComponent::ExecuteAttack()
 		else if (memory && memory->IsUnderPressure() && memory->CanUseAction(SmashAction, SmashCooldown)) { selectedAction = SmashAction; }
 	}
 	//射撃Styleで特殊行動が未選択の場合は静止または照準中の相手へ連続射撃する
-	else if (selectedAction == BasicAttackAction && m_enemy->m_CurrentStyle == EEnemyAttackStyle::Gun)
+	else if (selectedAction == BasicAttackAction && m_enemy->m_currentStyle == EEnemyAttackStyle::Gun)
 	{
 		//狙いやすい状態のプレイヤーには連続射撃を選択する
 		if (memory && (memory->IsPlayerStationary() || memory->IsPlayerAiming()) && memory->CanUseAction(BarrageAction, BarrageCooldown))
@@ -201,7 +201,7 @@ bool UEnemyDecisionComponent::ExecuteAttack()
 		}
 	}
 	//レーザーStyleではCooldownと連続使用を確認してから攻撃する
-	else if (selectedAction == BasicAttackAction && m_enemy->m_CurrentStyle == EEnemyAttackStyle::Laser)
+	else if (selectedAction == BasicAttackAction && m_enemy->m_currentStyle == EEnemyAttackStyle::Laser)
 	{
 		//レーザーがCooldown中または直前にも使用した場合は通常武器へ戻す
 		if ((memory && !memory->CanUseAction(LaserAction, LaserCooldown)) || m_lastBossAction == LaserAction)
@@ -234,13 +234,13 @@ bool UEnemyDecisionComponent::ExecuteAttack()
 void UEnemyDecisionComponent::UpdateAdaptiveStyle(float _targetDistance)
 {
 	//Adaptive Styleの初期化がまだ行われていない場合、現在の攻撃方式がAdaptiveかどうかを判定する
-	if (!b_mStyleProfileInitialized)
+	if (!m_styleProfileInitialized)
 	{
-		b_mUsesAdaptiveStyle = m_enemy->m_CurrentStyle == EEnemyAttackStyle::Adaptive;
-		b_mStyleProfileInitialized = true;
+		m_usesAdaptiveStyle = m_enemy->m_currentStyle == EEnemyAttackStyle::Adaptive;
+		m_styleProfileInitialized = true;
 	}
 	//Adaptive Styleを使用しない場合、処理を終了する
-	if (!b_mUsesAdaptiveStyle) { return; }
+	if (!m_usesAdaptiveStyle) { return; }
 
 	//プレイヤーとの距離からAdaptive型が装備する攻撃Style
 	const EEnemyAttackStyle desiredStyle = _targetDistance <= m_adaptiveMeleeDistance ? EEnemyAttackStyle::Melee : EEnemyAttackStyle::Gun;
@@ -289,7 +289,7 @@ void UEnemyDecisionComponent::UpdateBossStyle(float _deltaTime, float _targetDis
 	if (laserScore > bestScore) { desiredStyle = EEnemyAttackStyle::Laser; }
 
 	//現在の攻撃方式と選択された攻撃方式が異なる場合、攻撃方式を切り替える
-	if (desiredStyle != m_enemy->m_CurrentStyle)
+	if (desiredStyle != m_enemy->m_currentStyle)
 	{
 		m_enemy->StopCombatIdleAnimation();
 		m_enemy->SwitchWeapon(desiredStyle);
@@ -428,9 +428,9 @@ bool UEnemyDecisionComponent::CommitBossAction(FName _actionName)
 	//同じ特殊攻撃の連続使用を防ぐために記録する直前の行動名
 	m_lastBossAction = _actionName;
 	//最終Phaseで攻撃間隔を短縮するか示す状態
-	const bool b_finalPhase = m_enemy->m_EnemyRank == EEnemyRank::LastBoss && m_enemy->GetBossPhase() == EBossPhase::Phase3;
+	const bool finalPhase = m_enemy->m_enemyRank == EEnemyRank::LastBoss && m_enemy->GetBossPhase() == EBossPhase::Phase3;
 	//RankとPhaseに対応する待機時間を加えて次の行動可能時刻を設定する
 	m_nextBossActionTime = (GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f) +
-						   (b_finalPhase ? FMath::RandRange(1.4f, 2.f) : FMath::RandRange(BossActionIntervalMin, BossActionIntervalMax));
+						   (finalPhase ? FMath::RandRange(1.4f, 2.f) : FMath::RandRange(BossActionIntervalMin, BossActionIntervalMax));
 	return true;
 }

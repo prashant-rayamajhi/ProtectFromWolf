@@ -19,8 +19,8 @@ constexpr float PlayerHabitLearningWindow = 8.f;
 UEnemyCombatMemoryComponent::UEnemyCombatMemoryComponent()
 	: m_posture(EEnemyCombatPosture::Relaxed), m_lastSeenTime(-BIG_NUMBER), m_lastDamageTime(-BIG_NUMBER), m_recentDamagePressure(0.f),
 	  m_playerHealthRatio(1.f), m_playerSpeed(0.f), m_targetDistance(BIG_NUMBER), m_aimHabit(0.f), m_stationaryHabit(0.f),
-	  m_combatMemoryDuration(6.f), m_pressureThreshold(30.f), b_mCanSeeTarget(false), b_mPlayerAiming(false), b_mPlayerAttacking(false),
-	  b_mPlayerWerewolf(false), b_mPlayerStationary(false)
+	  m_combatMemoryDuration(6.f), m_pressureThreshold(30.f), m_canSeeTarget(false), m_playerAiming(false), m_playerAttacking(false),
+	  m_playerWerewolf(false), m_playerStationary(false)
 {
 	//戦闘記憶はAI Serviceから更新するためComponentのTickを無効化する
 	PrimaryComponentTick.bCanEverTick = false;
@@ -32,7 +32,7 @@ void UEnemyCombatMemoryComponent::ObservePlayer(APlayerChara *_player, float _ta
 	//プレイヤーの観測情報を更新する
 	m_observedPlayer = _player;
 	m_targetDistance = _targetDistance;
-	b_mCanSeeTarget = _canSeeTarget;
+	m_canSeeTarget = _canSeeTarget;
 	m_recentDamagePressure = FMath::Max(0.f, m_recentDamagePressure - PressureDecayPerSecond * _deltaTime);
 
 	//プレイヤーが存在する場合、体力割合、速度、構え状態を更新する
@@ -40,15 +40,15 @@ void UEnemyCombatMemoryComponent::ObservePlayer(APlayerChara *_player, float _ta
 	{
 		m_playerHealthRatio = FMath::Clamp(_player->GetHealthRatio(), 0.f, 1.f);
 		m_playerSpeed = _player->GetVelocity().Size2D();
-		b_mPlayerStationary = m_playerSpeed <= StationarySpeedThreshold;
-		b_mPlayerAiming = _player->IsAiming();
+		m_playerStationary = m_playerSpeed <= StationarySpeedThreshold;
+		m_playerAiming = _player->IsAiming();
 		//プレイヤーの攻撃状態と狼男状態を更新する
-		b_mPlayerAttacking = _player->IsAttacking();
-		b_mPlayerWerewolf = _player->IsWerewolf();
+		m_playerAttacking = _player->IsAttacking();
+		m_playerWerewolf = _player->IsWerewolf();
 		//今回の観測値を行動傾向へ反映する補間割合
 		const float learningAlpha = FMath::Clamp(_deltaTime / PlayerHabitLearningWindow, 0.f, 1.f);
-		m_aimHabit = FMath::Lerp(m_aimHabit, b_mPlayerAiming ? 1.f : 0.f, learningAlpha);
-		m_stationaryHabit = FMath::Lerp(m_stationaryHabit, b_mPlayerStationary ? 1.f : 0.f, learningAlpha);
+		m_aimHabit = FMath::Lerp(m_aimHabit, m_playerAiming ? 1.f : 0.f, learningAlpha);
+		m_stationaryHabit = FMath::Lerp(m_stationaryHabit, m_playerStationary ? 1.f : 0.f, learningAlpha);
 	}
 
 	//ターゲットを視認できる場合、最後に視認した時間を更新する
@@ -83,7 +83,7 @@ bool UEnemyCombatMemoryComponent::CanUseAction(FName _actionName, float _cooldow
 //戦闘か判定する関数
 bool UEnemyCombatMemoryComponent::IsInCombat() const
 {
-	return b_mCanSeeTarget || GetCurrentTime() - m_lastSeenTime <= m_combatMemoryDuration;
+	return m_canSeeTarget || GetCurrentTime() - m_lastSeenTime <= m_combatMemoryDuration;
 }
 
 //戦闘姿勢を更新する関数

@@ -19,12 +19,12 @@
 
 //知覚設定、Behavior Tree、従来AIで使用する初期状態を設定する関数
 AEnemyAIController::AEnemyAIController()
-	: m_pEnemy(nullptr), m_aiPerception(nullptr), m_sightConfig(nullptr), m_hearingConfig(nullptr), b_mUsingBehaviorTree(false),
+	: m_enemy(nullptr), m_aiPerception(nullptr), m_sightConfig(nullptr), m_hearingConfig(nullptr), m_usingBehaviorTree(false),
 	  m_adaptiveMeleeDist(200.f), m_adaptiveRangeBackDist(800.f), m_hideDuration(3.f), m_losCheckTimer(0.f), m_losCheckInterval(0.2f),
-	  m_bLastCanSeePlayer(false), m_bWeaponDrawn(false), m_strafeTimer(0.f), m_strafeInterval(2.f), m_currentStrafeDir(0.f),
-	  m_bIsAttackCooldown(false), m_bossModeTimer(0.f), m_bIsMeleeMode(false), m_bDoingPostAmmoLaser(false), m_lastPlayerNoiseTime(-BIG_NUMBER),
+	  m_lastCanSeePlayer(false), m_weaponDrawn(false), m_strafeTimer(0.f), m_strafeInterval(2.f), m_currentStrafeDir(0.f),
+	  m_isAttackCooldown(false), m_bossModeTimer(0.f), m_isMeleeMode(false), m_doingPostAmmoLaser(false), m_lastPlayerNoiseTime(-BIG_NUMBER),
 	  m_lastPlayerNoiseLocation(FVector::ZeroVector), m_lastVisualContactTime(-BIG_NUMBER), m_lastVisualContactLocation(FVector::ZeroVector),
-	  b_mHasActiveVisualContact(false), m_btPerceptionRefreshTime(0.f), m_btIdleRecoveryTime(0.f)
+	  m_hasActiveVisualContact(false), m_btPerceptionRefreshTime(0.f), m_btIdleRecoveryTime(0.f)
 {
 	//AI Controllerを毎フレーム更新できるようにする
 	PrimaryActorTick.bCanEverTick = true;
@@ -65,30 +65,30 @@ void AEnemyAIController::OnPossess(APawn *_pawn)
 	Super::OnPossess(_pawn);
 
 	//操作対象とプレイヤーの参照を取得する
-	m_pEnemy = Cast<AEnemyChara>(_pawn);
+	m_enemy = Cast<AEnemyChara>(_pawn);
 	m_targetActor = UGameplayStatics::GetPlayerCharacter(GetWorld(), 0);
 	//知覚コンポーネントへ現在の刺激を再取得させる
 	if (m_aiPerception) m_aiPerception->RequestStimuliListenerUpdate();
 
 	//敵のCharacter MovementをAI移動向けの回転設定へ変更する
-	if (m_pEnemy && m_pEnemy->GetCharacterMovement())
+	if (m_enemy && m_enemy->GetCharacterMovement())
 	{
 		//ナビゲーション上でしゃがみ移動を許可する
-		UCharacterMovementComponent *movement = m_pEnemy->GetCharacterMovement();
+		UCharacterMovementComponent *movement = m_enemy->GetCharacterMovement();
 		movement->NavAgentProps.bCanCrouch = true;
 		movement->bOrientRotationToMovement = true;
 		movement->bUseControllerDesiredRotation = false;
 		movement->RotationRate = FRotator(0.f, 540.f, 0.f);
-		m_pEnemy->bUseControllerRotationYaw = false;
+		m_enemy->bUseControllerRotationYaw = false;
 	}
 
 	//ボス戦における初期モードを遠距離攻撃に設定しランダムな時間を割り当てる
 	m_bossModeTimer = FMath::RandRange(2.0f, 6.0f);
-	m_bIsMeleeMode = false;
+	m_isMeleeMode = false;
 
 	//敵へ実行するBehavior Tree Asset
 	UBehaviorTree *behaviorTree = m_behaviorTreeAsset.LoadSynchronous();
-	b_mUsingBehaviorTree = behaviorTree && RunBehaviorTree(behaviorTree);
+	m_usingBehaviorTree = behaviorTree && RunBehaviorTree(behaviorTree);
 }
 
 //プレイヤーの物音位置を記憶してBlackboardの攻撃対象を更新する関数
@@ -112,12 +112,12 @@ void AEnemyAIController::NotifyPlayerNoise(AActor *_player, const FVector &_nois
 void AEnemyAIController::PrimeForArenaCombat(AActor *_player)
 {
 	//プレイヤーまたは敵本体を取得できない場合は戦闘を開始しない
-	if (!IsValid(_player) || !m_pEnemy) { return; }
+	if (!IsValid(_player) || !m_enemy) { return; }
 	NotifyPlayerNoise(_player, _player->GetActorLocation());
 	//戦闘開始時点でプレイヤーを直接視認できるか示す変数
-	const bool b_directSight = LineOfSightTo(_player);
-	UpdateVisualContact(_player, b_directSight, _player->GetActorLocation());
-	m_pEnemy->SetCanSeePlayer(b_directSight);
+	const bool directSight = LineOfSightTo(_player);
+	UpdateVisualContact(_player, directSight, _player->GetActorLocation());
+	m_enemy->SetCanSeePlayer(directSight);
 	//Blackboardへ攻撃対象を設定して初回判断の遅延を防ぐ
 	if (UBlackboardComponent *blackboard = GetBlackboardComponent())
 	{
@@ -140,7 +140,7 @@ void AEnemyAIController::UpdateVisualContact(AActor *_player, bool _canSee, cons
 	//プレイヤーまたはWorldを取得できない場合は視覚記憶を変更しない
 	if (!IsValid(_player) || !GetWorld()) { return; }
 	m_targetActor = _player;
-	b_mHasActiveVisualContact = _canSee;
+	m_hasActiveVisualContact = _canSee;
 	//直接視認できた時だけ視認時刻と位置を最新値へ更新する
 	if (_canSee)
 	{
@@ -185,17 +185,17 @@ void AEnemyAIController::Tick(float _deltaTime)
 	//親クラスのTick処理を実行する
 	Super::Tick(_deltaTime);
 	//Behavior Tree使用中は停止監視だけを更新して従来State処理を実行しない
-	if (b_mUsingBehaviorTree)
+	if (m_usingBehaviorTree)
 	{
 		TickBehaviorTreeSafety(_deltaTime);
 		return;
 	}
 
 	//敵本体または攻撃対象を取得できない場合は行動を更新しない
-	if (!m_pEnemy || !m_targetActor) { return; }
+	if (!m_enemy || !m_targetActor) { return; }
 
 	//敵が倒されて消滅している場合は、AIコントローラー自身も破棄して処理を止める
-	if (!IsValid(m_pEnemy))
+	if (!IsValid(m_enemy))
 	{
 		Destroy();
 		return;
@@ -206,7 +206,7 @@ void AEnemyAIController::Tick(float _deltaTime)
 	{
 		StopMovement();
 		//攻撃中の場合はフェーズ表示へ弾が残らないよう射撃を停止する
-		if (m_pEnemy->IsAttacking()) { m_pEnemy->StopFiring(); }
+		if (m_enemy->IsAttacking()) { m_enemy->StopFiring(); }
 		return;
 	}
 
@@ -223,7 +223,7 @@ void AEnemyAIController::Tick(float _deltaTime)
 	UpdateWeaponState();
 
 	//敵の体力が減り退避条件を満たした場合の処理
-	if (m_pEnemy->ShouldRetreat() && m_currentState != EAIState::Retreat) { m_currentState = EAIState::Retreat; }
+	if (m_enemy->ShouldRetreat() && m_currentState != EAIState::Retreat) { m_currentState = EAIState::Retreat; }
 
 	//現在の状況に応じてAIの状態を決定する
 	UpdateStateLogic();
@@ -255,7 +255,7 @@ void AEnemyAIController::Tick(float _deltaTime)
 void AEnemyAIController::TickBehaviorTreeSafety(float _deltaTime)
 {
 	//敵が無効またはフェーズ表示中の場合は停止監視時間を初期化する
-	if (!IsValid(m_pEnemy) || ASpawnEnemy::IsPhaseDisplaying())
+	if (!IsValid(m_enemy) || ASpawnEnemy::IsPhaseDisplaying())
 	{
 		m_btIdleRecoveryTime = 0.f;
 		return;
@@ -276,7 +276,7 @@ void AEnemyAIController::TickBehaviorTreeSafety(float _deltaTime)
 		if (LineOfSightTo(m_targetActor))
 		{
 			UpdateVisualContact(m_targetActor, true, m_targetActor->GetActorLocation());
-			m_pEnemy->SetCanSeePlayer(true);
+			m_enemy->SetCanSeePlayer(true);
 			//Blackboardへ現在のプレイヤーと視認状態を書き戻す
 			if (UBlackboardComponent *blackboard = GetBlackboardComponent())
 			{
@@ -287,17 +287,17 @@ void AEnemyAIController::TickBehaviorTreeSafety(float _deltaTime)
 	}
 
 	//視覚または物音からプレイヤー位置を把握しているか示す変数
-	const bool b_combatAware = HasActiveVisualContact() || HasRecentVisualContact() || HasRecentPlayerNoise();
+	const bool combatAware = HasActiveVisualContact() || HasRecentVisualContact() || HasRecentPlayerNoise();
 	//停止中の敵とプレイヤーの平面距離
-	const float targetDistance = FVector::Dist2D(m_pEnemy->GetActorLocation(), m_targetActor->GetActorLocation());
+	const float targetDistance = FVector::Dist2D(m_enemy->GetActorLocation(), m_targetActor->GetActorLocation());
 	//現在距離では攻撃せず移動する必要があるか示す変数
-	const bool b_needsMovement = targetDistance > FMath::Max(m_pEnemy->GetAttackRange() * 1.15f, 320.f);
+	const bool needsMovement = targetDistance > FMath::Max(m_enemy->GetAttackRange() * 1.15f, 320.f);
 	//認識中にもかかわらず移動経路を持たず待機しているか示す変数
-	const bool b_idleWithoutPath = b_combatAware && m_pEnemy->GetActionState() == EActionState::Idle &&
+	const bool idleWithoutPath = combatAware && m_enemy->GetActionState() == EActionState::Idle &&
 								   GetMoveStatus() != EPathFollowingStatus::Moving &&
-								   (m_pEnemy->m_EnemyRank != EEnemyRank::Minion || b_needsMovement);
+								   (m_enemy->m_enemyRank != EEnemyRank::Minion || needsMovement);
 	//正常に行動中の場合は停止監視時間を初期化する
-	if (!b_idleWithoutPath)
+	if (!idleWithoutPath)
 	{
 		m_btIdleRecoveryTime = 0.f;
 		return;
@@ -315,50 +315,50 @@ void AEnemyAIController::TickBehaviorTreeSafety(float _deltaTime)
 bool AEnemyAIController::CheckLineOfSight()
 {
 	//敵本体または攻撃対象を取得できない場合は視認失敗として返す
-	if (!m_pEnemy || !m_targetActor) { return false; }
+	if (!m_enemy || !m_targetActor) { return false; }
 	//視界距離と遮蔽物判定の両方を満たしたか示す変数
 	bool bCanSee = false;
 
 	//ボスの場合は視野角を無視して全方位かつ長距離の索敵判定を行う
-	if (m_pEnemy->m_EnemyRank == EEnemyRank::MiddleBoss || m_pEnemy->m_EnemyRank == EEnemyRank::LastBoss)
+	if (m_enemy->m_enemyRank == EEnemyRank::MiddleBoss || m_enemy->m_enemyRank == EEnemyRank::LastBoss)
 	{
 		//ボスとプレイヤーの現在距離
-		float distanceToPlayer = FVector::Dist(m_pEnemy->GetActorLocation(), m_targetActor->GetActorLocation());
+		float distanceToPlayer = FVector::Dist(m_enemy->GetActorLocation(), m_targetActor->GetActorLocation());
 		//敵ランクと現在状態から決定する最大視認距離
 		float maxSightDistance = 0.f;
 
 		//中間ボスは最低二千Unitの視認距離を確保する
-		if (m_pEnemy->m_EnemyRank == EEnemyRank::MiddleBoss)
+		if (m_enemy->m_enemyRank == EEnemyRank::MiddleBoss)
 		{
 			//中間ボスの索敵距離設定
-			maxSightDistance = FMath::Max(2000.f, m_pEnemy->GetChaseRange());
+			maxSightDistance = FMath::Max(2000.f, m_enemy->GetChaseRange());
 		}
 		else
 		{
 			//ラストボスの索敵距離設定
-			maxSightDistance = m_pEnemy->GetChaseRange() * 1.5f;
+			maxSightDistance = m_enemy->GetChaseRange() * 1.5f;
 		}
 
 		//プレイヤーが視認距離内にいる場合だけ遮蔽物をLine Traceで確認する
 		if (distanceToPlayer <= maxSightDistance)
 		{
 			//敵の視点からプレイヤーまでの遮蔽物を受け取る結果
-			FHitResult HitResult;
+			FHitResult hitResult;
 			//自身を射線判定から除外するためのCollision Query設定
-			FCollisionQueryParams CollisionParams;
-			CollisionParams.AddIgnoredActor(m_pEnemy);
+			FCollisionQueryParams collisionParams;
+			collisionParams.AddIgnoredActor(m_enemy);
 
 			//目線の高さ同士で間に障害物がないかレイトレースで確認する
 			//敵の目線高さから開始する射線位置
-			FVector Start = m_pEnemy->GetActorLocation() + FVector(0, 0, 80.f);
+			FVector start = m_enemy->GetActorLocation() + FVector(0, 0, 80.f);
 			//プレイヤーの目線高さを狙う射線終端
-			FVector End = m_targetActor->GetActorLocation() + FVector(0, 0, 80.f);
+			FVector end = m_targetActor->GetActorLocation() + FVector(0, 0, 80.f);
 
 			//敵とプレイヤーの間に遮蔽物があるか示す変数
-			bool bHit = GetWorld()->LineTraceSingleByChannel(HitResult, Start, End, ECC_Visibility, CollisionParams);
+			bool bHit = GetWorld()->LineTraceSingleByChannel(hitResult, start, end, ECC_Visibility, collisionParams);
 
 			//障害物がないかプレイヤー自身に当たった場合は見えていると判定する
-			if (!bHit || HitResult.GetActor() == m_targetActor) { bCanSee = true; }
+			if (!bHit || hitResult.GetActor() == m_targetActor) { bCanSee = true; }
 		}
 	}
 	else
@@ -368,15 +368,15 @@ bool AEnemyAIController::CheckLineOfSight()
 	}
 
 	//視界の状態が切り替わった場合のみ処理を実行する
-	if (bCanSee != m_bLastCanSeePlayer)
+	if (bCanSee != m_lastCanSeePlayer)
 	{
-		m_pEnemy->SetCanSeePlayer(bCanSee);
-		m_bLastCanSeePlayer = bCanSee;
+		m_enemy->SetCanSeePlayer(bCanSee);
+		m_lastCanSeePlayer = bCanSee;
 
 		//見失った場合は射撃を停止し視線を外す
 		if (!bCanSee)
 		{
-			m_pEnemy->StopFiring();
+			m_enemy->StopFiring();
 			ClearFocus(EAIFocusPriority::Gameplay);
 		}
 	}
@@ -388,45 +388,45 @@ bool AEnemyAIController::CheckLineOfSight()
 void AEnemyAIController::UpdateWeaponState()
 {
 	//敵本体または攻撃対象を取得できない場合は武器状態を変更しない
-	if (!m_pEnemy || !m_targetActor) { return; }
+	if (!m_enemy || !m_targetActor) { return; }
 	//ミニオンの武器状態はBehavior Tree側で管理するため処理しない
-	if (m_pEnemy->m_EnemyRank == EEnemyRank::Minion) { return; }
+	if (m_enemy->m_enemyRank == EEnemyRank::Minion) { return; }
 	//リロード中はモンタージュと武器Socketを維持するため処理しない
-	if (m_pEnemy->IsReloading()) { return; }
+	if (m_enemy->IsReloading()) { return; }
 	//武器を構える範囲判定に使用するプレイヤーまでの距離二乗
-	const float distSq = FVector::DistSquared(m_pEnemy->GetActorLocation(), m_targetActor->GetActorLocation());
+	const float distSq = FVector::DistSquared(m_enemy->GetActorLocation(), m_targetActor->GetActorLocation());
 	//平方根計算を避けて比較する追跡距離の二乗
-	const float chaseSq = FMath::Square(m_pEnemy->GetChaseRange());
+	const float chaseSq = FMath::Square(m_enemy->GetChaseRange());
 	//敵が現在プレイヤーを視認できているか示す変数
-	bool bCanSee = m_pEnemy->CanSeePlayer();
+	bool bCanSee = m_enemy->CanSeePlayer();
 
 	//プレイヤーが見えていて追跡範囲内の場合は武器を構える
 	if (bCanSee && distSq <= chaseSq)
 	{
 		//未装備または収納中の場合だけ武器を構える動作を開始する
-		if (!m_bWeaponDrawn && (m_pEnemy->GetWeaponState() == EWeaponState::Holstered || m_pEnemy->GetWeaponState() == EWeaponState::Holstering))
+		if (!m_weaponDrawn && (m_enemy->GetWeaponState() == EWeaponState::Holstered || m_enemy->GetWeaponState() == EWeaponState::Holstering))
 		{
-			m_pEnemy->DrawWeapon();
-			m_bWeaponDrawn = true;
+			m_enemy->DrawWeapon();
+			m_weaponDrawn = true;
 		}
 	}
 	//プレイヤーが遠すぎるか見失った場合は武器をしまう
 	else if (distSq > chaseSq * 1.5f || !bCanSee)
 	{
 		//攻撃とリロードの途中では武器収納を開始しない
-		if (!m_pEnemy->IsAttacking() && !m_pEnemy->IsReloading())
+		if (!m_enemy->IsAttacking() && !m_enemy->IsReloading())
 		{
 			//ボスだけが非戦闘時の武器収納アニメーションを使用する
-			if (m_pEnemy->m_EnemyRank != EEnemyRank::Minion)
+			if (m_enemy->m_enemyRank != EEnemyRank::Minion)
 			{
 				//武器が構え済みまたは構え途中の場合だけ収納候補として扱う
-				if (m_bWeaponDrawn && (m_pEnemy->GetWeaponState() == EWeaponState::Ready || m_pEnemy->GetWeaponState() == EWeaponState::Drawing))
+				if (m_weaponDrawn && (m_enemy->GetWeaponState() == EWeaponState::Ready || m_enemy->GetWeaponState() == EWeaponState::Drawing))
 				{
 					//構え動作中のSocket切替と競合しない時だけ収納を開始する
-					if (m_pEnemy->GetWeaponState() != EWeaponState::Drawing)
+					if (m_enemy->GetWeaponState() != EWeaponState::Drawing)
 					{
-						m_pEnemy->HolsterWeapon();
-						m_bWeaponDrawn = false;
+						m_enemy->HolsterWeapon();
+						m_weaponDrawn = false;
 					}
 				}
 			}
