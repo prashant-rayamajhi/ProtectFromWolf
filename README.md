@@ -17,12 +17,28 @@
 
 手元のソースには、制作期間終了後に行った不具合修正、責務分割、コメント整理が含まれます。応募時には制作期間中の実装と、その後のポートフォリオ向け改修を区別して説明します。
 
-### 2026年10月6日の更新
+### 2026年10月6日：担当範囲の確認と掲載拡張
 
-- 既存の担当コード5実装・10ファイルを最新の開発プロジェクトへ同期しました。
+本人の確認に基づき、敵専用武器・敵側の戦闘処理・AI・敵システム・プレイヤーHUD・タイトル／クリア／ゲームオーバーの処理へ拡張しました。現在はC++関連59ファイルです。詳しい掲載・除外理由は[掲載範囲](Source/README.md)を参照してください。
+
+| 分野 | 主なソース |
+| --- | --- |
+| 敵の銃・弾・近接武器 | [Weapons](Source/ProtectFromWolf/Private/Weapons) |
+| 敵の戦闘・ボス技 | [EnemyCharaCombat.cpp](Source/ProtectFromWolf/Private/Enemy/EnemyCharaCombat.cpp)、[EnemyCharaBoss.cpp](Source/ProtectFromWolf/Private/Enemy/EnemyCharaBoss.cpp)、[Combat](Source/ProtectFromWolf/Private/Combat) |
+| 認識・捜索・行動遷移 | [AI](Source/ProtectFromWolf/Private/AI) |
+| 状態・体力・遮蔽物・連携 | [Enemy](Source/ProtectFromWolf/Private/Enemy) |
+| プレイヤーHUD・回避表示 | [PlayerUI.cpp](Source/ProtectFromWolf/Private/UI/PlayerUI.cpp) |
+| タイトル・クリア・ゲームオーバー | [SciFiScreenSubsystem.cpp](Source/ProtectFromWolf/Private/UI/SciFiScreenSubsystem.cpp)、[SciFiScreenWidget.cpp](Source/ProtectFromWolf/Private/UI/SciFiScreenWidget.cpp) |
+| タイトルの人物・開始演出 | [MenuCharacterStage.cpp](Source/ProtectFromWolf/Private/UI/MenuCharacterStage.cpp) |
+
+対応するヘッダーは`Public`に掲載しています。画像・モデルなどの元アセットや、敵・ボスのHPウィジェットは今回の追加対象に含めません。
+
+### 2026年10月6日の実行データ更新
+
+- 実行データ更新時点では既存の担当コード5実装・10ファイルを同期し、その後、上記59ファイルへ掲載範囲を拡張しました。
 - ゲーム本体のジャスト回避UIを小型化し、最後に操作した機器に合わせてキーボードの「ALT」／ゲームパッドの「B」を表示します。Xbox形式の表記であり、機種別アイコンの自動識別ではありません。
 - スティックの微小入力による表示の切り替わりを抑えています。
-- 制作当初の担当と追加改修の区別は[担当範囲](docs/担当範囲_20261006.txt)を参照してください。UI共有ファイルは新規公開していません。
+- 担当範囲と追加改修の区別は[担当範囲](docs/担当範囲_20261006.txt)を参照してください。
 - 敵の密集と足滑りは未解決の条件が残っています。全戦闘を不具合なく検証済みとはしていません。
 
 ### 2026年9月26日の更新履歴
@@ -66,12 +82,15 @@ GitHubの「Code → Download ZIP」やリリース欄の「Source code (zip)」
 - 銃の射撃処理の一部
 - 通常敵と中間ボス、ラストボスを含む敵キャラクター全般
 - 敵AIの知覚、状態管理、攻撃判断、移動、遮蔽物利用
+- 敵専用の武器と敵側の戦闘処理
+- プレイヤーHUD、タイトル・ゲームクリア・ゲームオーバー画面の処理
 
 ## 担当外・掲載しない範囲
 
 - プレイヤーキャラクターのうち担当を確認できない部分
 - 射撃システムのうち担当を確認できない部分
-- UI、マップ、音楽、効果音、3Dモデル、アニメーション等の作成者不明部分
+- 敵・ボスのHPウィジェット、戦闘段階UIなど、今回の確認範囲に含まれないUI処理
+- マップ、音楽、効果音、3Dモデル、アニメーション等の作成者不明部分
 - チームメンバーが作成した非公開コード
 - Unreal Engineの生成物、キャッシュ、パッケージ済みゲーム
 - 再配布許可を確認できないBlueprintとアセット
