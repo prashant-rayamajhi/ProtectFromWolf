@@ -31,13 +31,21 @@ void UEnemyCombatMemoryComponent::ObservePlayer(APlayerChara *_player, float _ta
 {
 	//プレイヤーの観測情報を更新する
 	m_observedPlayer = _player;
-	m_targetDistance = _targetDistance;
+	if (_canSeeTarget) { m_targetDistance = _targetDistance; }
 	m_canSeeTarget = _canSeeTarget;
 	m_recentDamagePressure = FMath::Max(0.f, m_recentDamagePressure - PressureDecayPerSecond * _deltaTime);
 
 	//プレイヤーが存在する場合、体力割合、速度、構え状態を更新する
-	if (_player)
+	if (IsValid(_player) && _canSeeTarget)
 	{
+		//小さな足踏みでは居座りを解除せず、実際に足場を変えたら対策の優先度を下げる
+		if (!m_hasHoldPosition || FVector::DistSquared2D(m_holdPosition, _player->GetActorLocation()) > FMath::Square(180.f))
+		{
+			m_holdPosition = _player->GetActorLocation();
+			m_holdTime = 0.f;
+			m_hasHoldPosition = true;
+		}
+		m_holdTime = FMath::Min(6.f, m_holdTime + FMath::Max(0.f, _deltaTime));
 		m_playerHealthRatio = FMath::Clamp(_player->GetHealthRatio(), 0.f, 1.f);
 		m_playerSpeed = _player->GetVelocity().Size2D();
 		m_playerStationary = m_playerSpeed <= StationarySpeedThreshold;
@@ -49,6 +57,16 @@ void UEnemyCombatMemoryComponent::ObservePlayer(APlayerChara *_player, float _ta
 		const float learningAlpha = FMath::Clamp(_deltaTime / PlayerHabitLearningWindow, 0.f, 1.f);
 		m_aimHabit = FMath::Lerp(m_aimHabit, m_playerAiming ? 1.f : 0.f, learningAlpha);
 		m_stationaryHabit = FMath::Lerp(m_stationaryHabit, m_playerStationary ? 1.f : 0.f, learningAlpha);
+		m_attackHabit = FMath::Lerp(m_attackHabit, m_playerAttacking ? 1.f : 0.f, learningAlpha);
+	}
+	else
+	{
+		//見えない間に移動や静止を推測せず、対策の確信だけを徐々に弱める
+		m_holdTime = FMath::Max(0.f, m_holdTime - FMath::Max(0.f, _deltaTime) * 0.25f);
+		//遮蔽物の向こうの操作を読み取らず、過去に観測した傾向だけを保持する
+		m_playerAiming = false;
+		m_playerAttacking = false;
+		m_playerStationary = false;
 	}
 
 	//ターゲットを視認できる場合、最後に視認した時間を更新する
@@ -56,6 +74,26 @@ void UEnemyCombatMemoryComponent::ObservePlayer(APlayerChara *_player, float _ta
 
 	//戦闘姿勢を更新する
 	UpdatePosture();
+}
+
+//過去の射撃を徐々に軽くして、新しい戦況へ追従できる履歴を残す関数
+void UEnemyCombatMemoryComponent::RecordShot()
+{
+	if (m_shotCount >= 20.f) { m_shotCount *= 0.5f; m_shotHits *= 0.5f; }
+	m_shotCount += 1.f;
+}
+
+//弾の命中通知を自分の射撃成績へ反映する関数
+void UEnemyCombatMemoryComponent::RecordShotHit()
+{
+	m_shotHits = FMath::Min(m_shotCount, m_shotHits + 1.f);
+}
+
+//少数の外れだけでは戦術を変えず、繰り返し失敗した時に位置や攻撃を見直す関数
+float UEnemyCombatMemoryComponent::GetShotFailure() const
+{
+	if (m_shotCount < 6.f) { return 0.f; }
+	return FMath::Clamp(1.f - m_shotHits / FMath::Max(1.f, m_shotCount) / 0.4f, 0.f, 1.f);
 }
 
 //ダメージ受けたを通知する関数

@@ -4,6 +4,12 @@
 #include "Enemy/EnemyChara.h"
 #include "Weapons/EnemyGun.h"
 #include "EngineUtils.h"
+#include "AIController.h"
+#include "Kismet/GameplayStatics.h"
+#include "Enemy/EnemyActionChoice.h"
+#include "Enemy/Components/EnemyCoverComponent.h"
+#include "Enemy/EnemyTeamTactics.h"
+#include "AI/Controllers/EnemyAIController.h"
 
 //敵の戦闘行動の意思決定に関する定数、列挙型、構造体、関数を定義する
 namespace
@@ -64,7 +70,8 @@ int32 CountNearbyCombatAllies(const AEnemyChara *_boss)
 		if (!IsValid(ally) || ally == _boss || ally->GetHealthRatio() <= 0.f || ally->m_enemyRank != EEnemyRank::Minion) { continue; }
 
 		//同じ戦闘空間に相当する距離内の雑魚敵だけを人数へ加える
-		if (FVector::DistSquared2D(_boss->GetActorLocation(), ally->GetActorLocation()) <= FMath::Square(5000.f)) { ++allyCount; }
+		if (FEnemyTeamTactics::SharesRoom(_boss, ally) &&
+			FVector::DistSquared2D(_boss->GetActorLocation(), ally->GetActorLocation()) <= FMath::Square(5000.f)) { ++allyCount; }
 	}
 	//ボスが連携行動へ利用できる雑魚敵数を返す
 	return allyCount;
@@ -86,7 +93,12 @@ void UEnemyDecisionComponent::UpdateDecision(float _deltaTime, float _targetDist
 	//初回判断時にComponentの所有者から敵を取得する
 	if (!m_enemy) m_enemy = Cast<AEnemyChara>(GetOwner());
 	//敵が無効または別行動中の場合は新しい判断を開始しない
-	if (!m_enemy || m_enemy->IsAttacking() || m_enemy->IsReloading()) { return; }
+	if (!IsValid(m_enemy) || m_enemy->GetHealthRatio() <= 0.f || m_enemy->IsTeleporting() || m_enemy->m_isSwitchingWeapon) { return; }
+	if (m_enemy->IsAttacking() || m_enemy->IsReloading()) { return; }
+	if (m_enemy->IsKnockedBack()) { return; }
+	//遮蔽物への移動と射撃位置からの反撃を武器切替で中断しない
+	if (_targetDistance >= 450.f && m_enemy->m_currentStyle == EEnemyAttackStyle::Gun && m_enemy->m_coverComponent &&
+		(m_enemy->m_coverComponent->IsUsingCover() || m_enemy->m_coverComponent->HasFiringWindow())) { return; }
 
 	//敵のランクがミニオンの場合、Adaptive Styleを更新する
 	if (m_enemy->m_enemyRank == EEnemyRank::Minion)
@@ -102,132 +114,63 @@ void UEnemyDecisionComponent::UpdateDecision(float _deltaTime, float _targetDist
 //攻撃 を現在の攻撃対象へ実行する関数
 bool UEnemyDecisionComponent::ExecuteAttack()
 {
-	//初回攻撃時にComponentの所有者から敵を取得する
-	if (!m_enemy) m_enemy = Cast<AEnemyChara>(GetOwner());
-	//敵が無効または別行動中の場合は攻撃を開始しない
-	if (!m_enemy || m_enemy->IsAttacking() || m_enemy->IsReloading()) { return false; }
+	//所有者が死亡、装備変更、別行動の最中なら新しい攻撃を重ねない
+	if (!m_enemy) { m_enemy = Cast<AEnemyChara>(GetOwner()); }
+	if (!IsValid(m_enemy) || m_enemy->GetHealthRatio() <= 0.f || m_enemy->IsTeleporting()) { return false; }
+	if (m_enemy->IsAttacking() || m_enemy->IsReloading() || m_enemy->m_isSwitchingWeapon) { return false; }
+	if (m_enemy->IsKnockedBack() || (m_enemy->m_coverComponent && m_enemy->m_coverComponent->IsUsingCover() &&
+		!m_enemy->m_coverComponent->HasFiringWindow())) { return false; }
 
-	//敵のランクがミニオンの場合、通常攻撃を実行する
+	//攻撃開始時にも射線を調べ、直前に遮蔽物へ隠れた相手を狙い続けない
+	AActor *target = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+	AEnemyAIController *controller = Cast<AEnemyAIController>(m_enemy->GetController());
+	if (!IsValid(target) || !controller || !controller->CanObserveTarget(target)) { return false; }
 	if (m_enemy->m_enemyRank == EEnemyRank::Minion)
 	{
 		m_enemy->PerformAttack();
-		return true;
+		return m_enemy->IsAttacking();
 	}
 
-	//Cooldown判定へ使用する現在のゲーム時間
-	const float currentTime = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.f;
-	//前回攻撃から待機時間が経過するまでは次の攻撃を選択しない
+	//前回の攻撃後に反撃できる間を残す
+	const float currentTime = GetWorld()->GetTimeSeconds();
 	if (currentTime < m_nextBossActionTime) { return false; }
-
-	//プレイヤーの行動傾向を攻撃選択へ反映する戦闘記憶Component
 	UEnemyCombatMemoryComponent *memory = m_enemy->m_combatMemoryComponent;
-	//攻撃選択へ使用するプレイヤーとの距離
-	const float distance = memory ? memory->GetTargetDistance() : BossMeleeDistance;
-	//連携射撃を選べるか判断する周囲の雑魚敵数
-	const int32 nearbyAllies = CountNearbyCombatAllies(m_enemy);
+	const float distance = FVector::Dist2D(m_enemy->GetActorLocation(), target->GetActorLocation());
+	const bool closeTarget = distance <= BossMeleeDistance;
+	const bool underPressure = memory && memory->IsUnderPressure();
+	const bool aiming = memory && memory->IsPlayerAiming();
+	const bool stationary = memory && memory->IsPlayerStationary();
+	const bool werewolf = memory && memory->IsPlayerWerewolf();
+	const bool lastBoss = m_enemy->m_enemyRank == EEnemyRank::LastBoss;
+	//実際に観測した居座りに対し、予兆付き攻撃で足場の変更を促す
+	const float holdPressure = memory ? memory->GetHoldPressure() : 0.f;
+	const float shotFailure = memory ? memory->GetShotFailure() : 0.f;
 
-	//戦況から特殊攻撃へ置き換える前の基本行動
-	FName selectedAction = BasicAttackAction;
-	//中間ボスは変身、攻撃、照準、静止へ対抗する特殊攻撃を選ぶ
-	if (memory && m_enemy->m_enemyRank == EEnemyRank::MiddleBoss)
+	//候補を独立して採点し、同点では行動名を比較して追加順による偏りを防ぐ
+	FEnemyActionChoice choice;
+	auto consider = [&](FName _action, float _score, bool _eligible, float _cooldown)
 	{
-		//近距離で攻め続けるプレイヤーには地面叩きつけで反撃する
-		if ((memory->IsPlayerWerewolf() || memory->IsUnderPressure() || memory->IsPlayerAttacking()) && distance <= BossFarDistance &&
-			memory->CanUseAction(SmashAction, SmashCooldown))
-		{
-			selectedAction = SmashAction;
-		}
-		//離れて照準中のプレイヤーには跳躍攻撃で間合いを詰める
-		else if (memory->IsPlayerAiming() && distance > BossMeleeDistance && memory->CanUseAction(LeapAction, LeapCooldown))
-		{
-			selectedAction = LeapAction;
-		}
-		//離れて静止するプレイヤーには連続射撃で移動を促す
-		else if (memory->IsPlayerStationary() && distance > BossMeleeDistance && m_enemy->m_currentStyle == EEnemyAttackStyle::Gun &&
-				 memory->CanUseAction(BarrageAction, BarrageCooldown))
-		{
-			selectedAction = BarrageAction;
-		}
-	}
-	//ラストボスは味方との連携とTeleportを含む攻撃候補から選ぶ
-	if (memory && m_enemy->m_enemyRank == EEnemyRank::LastBoss)
-	{
-		//近距離の狼男には地面叩きつけで接近戦を拒否する
-		if (memory->IsPlayerWerewolf() && distance <= BossMeleeDistance && memory->CanUseAction(SmashAction, SmashCooldown))
-		{
-			selectedAction = SmashAction;
-		}
-		//近距離で攻め続けられた場合は離脱Teleportで間合いを作る
-		else if ((memory->IsUnderPressure() || memory->IsPlayerAttacking()) && distance < BossMeleeDistance &&
-				 memory->CanUseAction(PhaseAwayAction, PhaseAwayCooldown))
-		{
-			selectedAction = PhaseAwayAction;
-		}
-		//遠距離から照準中のプレイヤーには接近Teleportで背後を狙う
-		else if (memory->IsPlayerAiming() && distance > BossFarDistance && memory->CanUseAction(AmbushAction, AmbushCooldown))
-		{
-			selectedAction = AmbushAction;
-		}
-		//雑魚敵が交戦中なら別方向から連続射撃を重ねる
-		else if (nearbyAllies > 0 && distance > BossMeleeDistance && m_enemy->m_currentStyle == EEnemyAttackStyle::Gun &&
-				 memory->CanUseAction(BarrageAction, BarrageCooldown))
-		{
-			selectedAction = BarrageAction;
-		}
-		//離れて静止するプレイヤーには予兆付きレーザーを選択する
-		else if (memory->IsPlayerStationary() && distance > BossMeleeDistance && memory->CanUseAction(LaserAction, LaserCooldown))
-		{
-			selectedAction = LaserAction;
-		}
-	}
+		if (!_eligible || (memory && !memory->CanUseAction(_action, _cooldown))) { return; }
+		if (_action != BasicAttackAction && _action == m_lastBossAction) { _score -= 45.f; }
+		choice.Consider(_action, _score, true);
+	};
 
-	//近接Styleで特殊行動が未選択の場合は戦況に合う近接攻撃を補う
-	if (selectedAction == BasicAttackAction && m_enemy->m_currentStyle == EEnemyAttackStyle::Melee)
-	{
-		//プレイヤーが狼男で、SmashActionが使用可能な場合、SmashActionを選択する
-		if (memory && memory->IsPlayerWerewolf() && memory->CanUseAction(SmashAction, SmashCooldown)) { selectedAction = SmashAction; }
-		//プレイヤーが近接範囲外なら跳躍攻撃で追跡する
-		else if (distance > BossMeleeDistance && (!memory || memory->CanUseAction(LeapAction, LeapCooldown))) { selectedAction = LeapAction; }
-		//近接戦で押されている場合は地面叩きつけで反撃する
-		else if (memory && memory->IsUnderPressure() && memory->CanUseAction(SmashAction, SmashCooldown)) { selectedAction = SmashAction; }
-	}
-	//射撃Styleで特殊行動が未選択の場合は静止または照準中の相手へ連続射撃する
-	else if (selectedAction == BasicAttackAction && m_enemy->m_currentStyle == EEnemyAttackStyle::Gun)
-	{
-		//狙いやすい状態のプレイヤーには連続射撃を選択する
-		if (memory && (memory->IsPlayerStationary() || memory->IsPlayerAiming()) && memory->CanUseAction(BarrageAction, BarrageCooldown))
-		{
-			selectedAction = BarrageAction;
-		}
-	}
-	//レーザーStyleではCooldownと連続使用を確認してから攻撃する
-	else if (selectedAction == BasicAttackAction && m_enemy->m_currentStyle == EEnemyAttackStyle::Laser)
-	{
-		//レーザーがCooldown中または直前にも使用した場合は通常武器へ戻す
-		if ((memory && !memory->CanUseAction(LaserAction, LaserCooldown)) || m_lastBossAction == LaserAction)
-		{
-			m_enemy->EquipWeapon(distance <= BossMeleeDistance ? EEnemyAttackStyle::Melee : EEnemyAttackStyle::Gun);
-			m_lastBossAction = NAME_None;
-			return true;
-		}
-		//レーザーを使用可能な場合は攻撃候補として確定する
-		selectedAction = LaserAction;
-	}
+	//通常攻撃は現在の武器で命中が期待できる場合だけ候補にする
+	const AEnemyGun *gun = m_enemy->GetCurrentGun();
+	const bool canShoot = m_enemy->m_currentStyle == EEnemyAttackStyle::Gun && gun && !gun->IsOutOfAmmo();
+	const bool canStrike = m_enemy->m_currentStyle == EEnemyAttackStyle::Melee && m_enemy->CanCommitMeleeAttack(target);
+	const bool coverFire = m_enemy->m_coverComponent && m_enemy->m_coverComponent->HasFiringWindow();
+	consider(BasicAttackAction, coverFire ? 105.f : 60.f, canStrike || (canShoot && distance <= gun->GetFireRange()), 0.f);
 
-	//同じ特殊攻撃が連続しないように通常攻撃へ戻す
-	if (selectedAction == m_lastBossAction && selectedAction != BasicAttackAction)
-	{
-		//前回と同じ行動を選択した場合、BasicAttackにフォールバックする
-		if (selectedAction == LaserAction)
-		{
-			m_enemy->EquipWeapon(distance <= BossMeleeDistance ? EEnemyAttackStyle::Melee : EEnemyAttackStyle::Gun);
-			m_lastBossAction = NAME_None;
-			return true;
-		}
-		selectedAction = BasicAttackAction;
-	}
-	//確定した行動を実行して戦闘記憶へ記録する
-	return CommitBossAction(selectedAction);
+	//接近戦、静止狙い、離脱、接近を比較し、溜めのある攻撃も戦況に応じて選ぶ
+	consider(SmashAction, 45.f + (werewolf ? 35.f : 0.f) + (underPressure ? 25.f : 0.f) + holdPressure * 60.f,
+		closeTarget && m_enemy->CanGroundSmash(), SmashCooldown);
+	consider(LaserAction, 40.f + (stationary ? 35.f : 0.f) + (aiming ? 10.f : 0.f) + holdPressure * 110.f + shotFailure * 40.f,
+		distance >= 650.f && distance <= 2500.f, LaserCooldown);
+	consider(PhaseAwayAction, 50.f + (underPressure ? 40.f : 0.f), lastBoss && closeTarget && underPressure, PhaseAwayCooldown);
+	consider(AmbushAction, 45.f + (aiming ? 25.f : 0.f), lastBoss && distance > BossFarDistance && aiming, AmbushCooldown);
+	if (choice.m_action.IsNone()) { return false; }
+	return CommitBossAction(choice.m_action);
 }
 
 //適応攻撃形式を更新する関数
@@ -243,7 +186,9 @@ void UEnemyDecisionComponent::UpdateAdaptiveStyle(float _targetDistance)
 	if (!m_usesAdaptiveStyle) { return; }
 
 	//プレイヤーとの距離からAdaptive型が装備する攻撃Style
-	const EEnemyAttackStyle desiredStyle = _targetDistance <= m_adaptiveMeleeDistance ? EEnemyAttackStyle::Melee : EEnemyAttackStyle::Gun;
+	//境界付近を往復しても武器を切り替え続けないよう、近接から戻る距離には余裕を持たせる
+	const float switchDistance = m_adaptiveMeleeDistance + (m_enemy->m_currentStyle == EEnemyAttackStyle::Melee ? 100.f : 0.f);
+	const EEnemyAttackStyle desiredStyle = _targetDistance <= switchDistance ? EEnemyAttackStyle::Melee : EEnemyAttackStyle::Gun;
 	//距離に対応する武器へ切り替える
 	m_enemy->EquipWeapon(desiredStyle);
 }
@@ -265,7 +210,11 @@ void UEnemyDecisionComponent::UpdateBossStyle(float _deltaTime, float _targetDis
 	//スタイル決定のための時間を減算する
 	m_styleDecisionTime -= _deltaTime;
 	//再評価時刻までは現在の攻撃Styleを維持する
-	if (m_styleDecisionTime > 0.f) { return; }
+	//距離外や再使用待ちのレーザーを維持して、近くの相手の前で固まることを防ぐ
+	const bool laserUnavailable = m_enemy->m_currentStyle == EEnemyAttackStyle::Laser &&
+		(_targetDistance < BossMeleeDistance || _targetDistance > 2500.f ||
+		 (m_enemy->m_combatMemoryComponent && !m_enemy->m_combatMemoryComponent->CanUseAction(LaserAction, LaserCooldown)));
+	if (m_styleDecisionTime > 0.f && !laserUnavailable) { return; }
 
 	//各攻撃の評価点から最終的に装備する攻撃Style
 	EEnemyAttackStyle desiredStyle = EEnemyAttackStyle::Melee;
@@ -331,10 +280,16 @@ float UEnemyDecisionComponent::ScoreMeleeStyle(float _targetDistance) const
 //射線、距離、遮蔽物状況から銃撃の選択点を算出する関数
 float UEnemyDecisionComponent::ScoreGunStyle(float _targetDistance) const
 {
+	//使用できる銃も予備弾薬もない状態では射撃を選ばない
+	const AEnemyGun *availableGun = m_enemy->GetCurrentGun();
+	//未生成と弾切れを区別し、近接装備で出現したボスの銃撃候補を永久に消さない
+	if (!IsValid(availableGun) && !m_enemy->CanEquipGun()) { return -BIG_NUMBER; }
+	if (IsValid(availableGun) && availableGun->IsOutOfAmmo() && availableGun->GetTotalAmmo() <= 0) { return -BIG_NUMBER; }
 	//射撃評価へプレイヤーの行動傾向を反映する戦闘記憶Component
 	const UEnemyCombatMemoryComponent *memory = m_enemy->m_combatMemoryComponent;
 	//中距離以上を優先する射撃Styleの基礎評価点
-	float score = _targetDistance > BossMeleeDistance ? 75.f : 15.f;
+	float score = _targetDistance > BossMeleeDistance ? 110.f : 15.f;
+	if (memory) { score -= memory->GetShotFailure() * 40.f; }
 	//連携射撃の評価へ使用する周囲の雑魚敵数
 	const int32 nearbyAllies = CountNearbyCombatAllies(m_enemy);
 
@@ -344,6 +299,8 @@ float UEnemyDecisionComponent::ScoreGunStyle(float _targetDistance) const
 	if (memory && memory->IsPlayerWerewolf()) { score -= 45.f; }
 	//静止を多用するプレイヤーには射撃評価を上げる
 	if (memory) { score += memory->GetStationaryHabit() * 35.f; }
+	//撃ち続ける相手には溜め攻撃より遮蔽物からの短い反撃を選びやすくする
+	if (memory && _targetDistance > BossMeleeDistance) { score += memory->GetAttackHabit() * 15.f - memory->GetHoldPressure() * 50.f; }
 	//雑魚敵が交戦中の場合は別方向からの連携射撃を優先する
 	if (nearbyAllies > 0 && _targetDistance > BossMeleeDistance) { score += 22.f; }
 	//マガジンの残弾割合に応じて射撃評価を下げる
@@ -361,10 +318,15 @@ float UEnemyDecisionComponent::ScoreGunStyle(float _targetDistance) const
 //プレイヤーの移動傾向、距離、クールダウンからレーザー攻撃の選択点を算出する関数
 float UEnemyDecisionComponent::ScoreLaserStyle(float _targetDistance) const
 {
+	//実行できない距離では候補に入れず、射撃か接近を選ぶ
+	if (_targetDistance < BossMeleeDistance || _targetDistance > 2500.f) { return -BIG_NUMBER; }
+	//再使用待ちのレーザーへ武器を切り替えて立ち止まることを防ぐ
+	if (m_enemy->m_combatMemoryComponent && !m_enemy->m_combatMemoryComponent->CanUseAction(LaserAction, LaserCooldown)) { return -BIG_NUMBER; }
 	//レーザー評価へプレイヤーの行動傾向を反映する戦闘記憶Component
 	const UEnemyCombatMemoryComponent *memory = m_enemy->m_combatMemoryComponent;
 	//遠距離を優先するレーザーStyleの基礎評価点
 	float score = _targetDistance >= BossFarDistance ? 90.f : 35.f;
+	if (memory) { score += memory->GetShotFailure() * 40.f; }
 	//連携攻撃の評価へ使用する周囲の雑魚敵数
 	const int32 nearbyAllies = CountNearbyCombatAllies(m_enemy);
 
@@ -377,6 +339,8 @@ float UEnemyDecisionComponent::ScoreLaserStyle(float _targetDistance) const
 	if (memory && memory->GetPlayerHealthRatio() <= 0.25f) { score += 20.f; }
 	//静止を多用するプレイヤーにはレーザー評価を上げる
 	if (memory) { score += memory->GetStationaryHabit() * 45.f; }
+	//継続射撃を観測した時は、無防備な長い溜めを控える
+	if (memory) { score += memory->GetHoldPressure() * 100.f - memory->GetAttackHabit() * 15.f; }
 	//雑魚敵が交戦中の場合は別方向からレーザーを重ねる
 	if (nearbyAllies > 0 && _targetDistance > BossMeleeDistance) { score += 15.f; }
 	//銃弾が少ない場合は弾薬を消費しないレーザー評価を上げる
@@ -421,6 +385,9 @@ bool UEnemyDecisionComponent::CommitBossAction(FName _actionName)
 		//特殊行動を選ばなかった場合は現在武器の通常攻撃を実行する
 		m_enemy->PerformAttack();
 	}
+
+	//武器の準備不足などで開始できなかった行動には待機時間を発生させない
+	if (!m_enemy->IsAttacking() && !m_enemy->IsTeleporting()) { return false; }
 
 	//ボス攻撃を戦闘記憶へ記録する
 	if (m_enemy->m_combatMemoryComponent) { m_enemy->m_combatMemoryComponent->SetActionCommitted(_actionName); }

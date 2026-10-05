@@ -1,5 +1,6 @@
 ﻿#include "AI/Controllers/EnemyAIController.h"
 #include "Enemy/EnemyChara.h"
+#include "Enemy/Components/EnemyCoverComponent.h"
 #include "Player/PlayerChara.h"
 #include "Weapons/EnemyGun.h"
 #include "NavigationSystem.h"
@@ -100,6 +101,8 @@ void AEnemyAIController::NotifyPlayerNoise(AActor *_player, const FVector &_nois
 	m_targetActor = _player;
 	m_lastPlayerNoiseLocation = _noiseLocation;
 	m_lastPlayerNoiseTime = GetWorld()->GetTimeSeconds();
+	//自分が聞いた音源だけを味方に伝え、報告の再送で記憶が永久に延長されることを防ぐ
+	ShareVisualContact(_player, _noiseLocation);
 	//Blackboardがある場合は物音を出したプレイヤーを追跡対象へ設定する
 	if (UBlackboardComponent *blackboard = GetBlackboardComponent())
 	{
@@ -113,16 +116,16 @@ void AEnemyAIController::PrimeForArenaCombat(AActor *_player)
 {
 	//プレイヤーまたは敵本体を取得できない場合は戦闘を開始しない
 	if (!IsValid(_player) || !m_enemy) { return; }
-	NotifyPlayerNoise(_player, _player->GetActorLocation());
+	//入場だけでは物音や位置を全員に通知せず、実際の視認から戦闘を始める
 	//戦闘開始時点でプレイヤーを直接視認できるか示す変数
-	const bool directSight = LineOfSightTo(_player);
+	const bool directSight = CanObserveTarget(_player);
 	UpdateVisualContact(_player, directSight, _player->GetActorLocation());
 	m_enemy->SetCanSeePlayer(directSight);
 	//Blackboardへ攻撃対象を設定して初回判断の遅延を防ぐ
 	if (UBlackboardComponent *blackboard = GetBlackboardComponent())
 	{
 		blackboard->SetValueAsObject(EnemyBlackboardKeys::TargetActor, _player);
-		blackboard->SetValueAsBool(EnemyBlackboardKeys::CanSeeTarget, true);
+		blackboard->SetValueAsBool(EnemyBlackboardKeys::CanSeeTarget, HasCombatAwareness());
 	}
 	//待機中のBehavior Treeを再開して戦闘判断を即時評価する
 	if (UBrainComponent *brain = GetBrainComponent()) brain->RestartLogic();
@@ -146,6 +149,7 @@ void AEnemyAIController::UpdateVisualContact(AActor *_player, bool _canSee, cons
 	{
 		m_lastVisualContactTime = GetWorld()->GetTimeSeconds();
 		m_lastVisualContactLocation = _location;
+		ShareVisualContact(_player, _location);
 	}
 }
 
@@ -158,6 +162,7 @@ bool AEnemyAIController::HasRecentVisualContact(float _memorySeconds) const
 //物音と視覚のうち新しい方から最後に判明したプレイヤー位置を取得する関数
 FVector AEnemyAIController::GetLastKnownPlayerLocation() const
 {
+	if (m_teamSeenTime > FMath::Max(m_lastPlayerNoiseTime, m_lastVisualContactTime)) { return m_teamSeenLocation; }
 	return m_lastPlayerNoiseTime > m_lastVisualContactTime ? m_lastPlayerNoiseLocation : m_lastVisualContactLocation;
 }
 
@@ -170,7 +175,7 @@ void AEnemyAIController::HandleTargetPerceptionUpdated(AActor *_actor, FAIStimul
 	//視覚刺激の場合は現在の視認成否を更新する
 	if (_stimulus.Type == UAISense::GetSenseID<UAISense_Sight>())
 	{
-		UpdateVisualContact(_actor, _stimulus.WasSuccessfullySensed(), _actor->GetActorLocation());
+		UpdateVisualContact(_actor, _stimulus.WasSuccessfullySensed() && CanObserveTarget(_actor), _actor->GetActorLocation());
 	}
 	//聴覚刺激を正常に受けた場合は刺激位置を物音記憶へ登録する
 	else if (_stimulus.Type == UAISense::GetSenseID<UAISense_Hearing>() && _stimulus.WasSuccessfullySensed())
@@ -184,9 +189,43 @@ void AEnemyAIController::Tick(float _deltaTime)
 {
 	//親クラスのTick処理を実行する
 	Super::Tick(_deltaTime);
+	//未視認の警戒中だけ減速し、発見・退避・被弾時には戦闘側へ速度管理を返す
+	if (IsValid(m_enemy) && m_enemy->GetCharacterMovement())
+	{
+		UCharacterMovementComponent *movement = m_enemy->GetCharacterMovement();
+		const bool cautious = HasCombatAwareness() && !HasActiveVisualContact() && !m_enemy->IsReloading() &&
+			!m_enemy->IsKnockedBack() && m_enemy->GetHealthRatio() > 0.f &&
+			!(m_enemy->m_coverComponent && m_enemy->m_coverComponent->IsUsingCover());
+		if (cautious && !m_cautious)
+		{
+			m_beforeAlertSpeed = movement->MaxWalkSpeed;
+			m_alertSpeed = m_beforeAlertSpeed * 0.6f;
+			movement->MaxWalkSpeed = m_alertSpeed;
+		}
+		else if (!cautious && m_cautious && FMath::IsNearlyEqual(movement->MaxWalkSpeed, m_alertSpeed))
+		{
+			movement->MaxWalkSpeed = m_beforeAlertSpeed;
+		}
+		m_cautious = cautious;
+	}
+	//吹き飛び中は経路移動による速度の上書きを止める
+	if (IsValid(m_enemy) && m_enemy->IsKnockedBack()) { return; }
 	//Behavior Tree使用中は停止監視だけを更新して従来State処理を実行しない
 	if (m_usingBehaviorTree)
 	{
+		//移動方向へ体を向ける設定では注目先だけで振り向かないため、停止時に既知の位置を見直す
+		if (IsValid(m_enemy) && HasCombatAwareness() && m_enemy->GetVelocity().SizeSquared2D() < 25.f &&
+			!m_enemy->IsAttacking() && !m_enemy->IsTeleporting() && m_enemy->GetHealthRatio() > 0.f)
+		{
+			const FVector look = GetLastKnownPlayerLocation() - m_enemy->GetActorLocation();
+			if (!look.IsNearlyZero())
+			{
+				//警戒中は記憶位置の左右をゆっくり見渡し、現在のプレイヤー位置を盗み見ない
+				const float scan = m_cautious ? FMath::Sin(GetWorld()->GetTimeSeconds() * 0.8f) * 40.f : 0.f;
+				const FRotator desired(0.f, look.Rotation().Yaw + scan, 0.f);
+				m_enemy->SetActorRotation(FMath::RInterpConstantTo(m_enemy->GetActorRotation(), desired, _deltaTime, m_cautious ? 60.f : 180.f));
+			}
+		}
 		TickBehaviorTreeSafety(_deltaTime);
 		return;
 	}
@@ -255,7 +294,7 @@ void AEnemyAIController::Tick(float _deltaTime)
 void AEnemyAIController::TickBehaviorTreeSafety(float _deltaTime)
 {
 	//敵が無効またはフェーズ表示中の場合は停止監視時間を初期化する
-	if (!IsValid(m_enemy) || ASpawnEnemy::IsPhaseDisplaying())
+	if (!IsValid(m_enemy) || m_enemy->GetHealthRatio() <= 0.f || m_enemy->IsTeleporting() || ASpawnEnemy::IsPhaseDisplaying())
 	{
 		m_btIdleRecoveryTime = 0.f;
 		return;
@@ -266,28 +305,23 @@ void AEnemyAIController::TickBehaviorTreeSafety(float _deltaTime)
 	if (!IsValid(m_targetActor)) { return; }
 
 	m_btPerceptionRefreshTime += _deltaTime;
-	//知覚の取りこぼしを防ぐため0.5秒間隔で視認状態を再確認する
-	if (m_btPerceptionRefreshTime >= 0.5f)
+	//知覚の取りこぼしを防ぐため0.2秒間隔で視認状態を再確認する
+	if (m_btPerceptionRefreshTime >= 0.2f)
 	{
 		m_btPerceptionRefreshTime = 0.f;
 		//知覚コンポーネントへ現在の刺激を再取得させる
 		if (m_aiPerception) m_aiPerception->RequestStimuliListenerUpdate();
-		//直接視認できる場合は視覚記憶とBlackboardを即時更新する
-		if (LineOfSightTo(m_targetActor))
-		{
-			UpdateVisualContact(m_targetActor, true, m_targetActor->GetActorLocation());
-			m_enemy->SetCanSeePlayer(true);
-			//Blackboardへ現在のプレイヤーと視認状態を書き戻す
-			if (UBlackboardComponent *blackboard = GetBlackboardComponent())
-			{
-				blackboard->SetValueAsObject(EnemyBlackboardKeys::TargetActor, m_targetActor);
-				blackboard->SetValueAsBool(EnemyBlackboardKeys::CanSeeTarget, true);
-			}
-		}
+		RefreshCombatAwareness();
 	}
 
 	//視覚または物音からプレイヤー位置を把握しているか示す変数
-	const bool combatAware = HasActiveVisualContact() || HasRecentVisualContact() || HasRecentPlayerNoise();
+	const bool combatAware = HasCombatAwareness();
+	//遮蔽物での待機と装備変更は意図した行動なので停止復旧の対象にしない
+	if (m_enemy->m_isSwitchingWeapon || (m_enemy->m_coverComponent && m_enemy->m_coverComponent->IsUsingCover()))
+	{
+		m_btIdleRecoveryTime = 0.f;
+		return;
+	}
 	//停止中の敵とプレイヤーの平面距離
 	const float targetDistance = FVector::Dist2D(m_enemy->GetActorLocation(), m_targetActor->GetActorLocation());
 	//現在距離では攻撃せず移動する必要があるか示す変数
@@ -316,56 +350,8 @@ bool AEnemyAIController::CheckLineOfSight()
 {
 	//敵本体または攻撃対象を取得できない場合は視認失敗として返す
 	if (!m_enemy || !m_targetActor) { return false; }
-	//視界距離と遮蔽物判定の両方を満たしたか示す変数
-	bool bCanSee = false;
-
-	//ボスの場合は視野角を無視して全方位かつ長距離の索敵判定を行う
-	if (m_enemy->m_enemyRank == EEnemyRank::MiddleBoss || m_enemy->m_enemyRank == EEnemyRank::LastBoss)
-	{
-		//ボスとプレイヤーの現在距離
-		float distanceToPlayer = FVector::Dist(m_enemy->GetActorLocation(), m_targetActor->GetActorLocation());
-		//敵ランクと現在状態から決定する最大視認距離
-		float maxSightDistance = 0.f;
-
-		//中間ボスは最低二千Unitの視認距離を確保する
-		if (m_enemy->m_enemyRank == EEnemyRank::MiddleBoss)
-		{
-			//中間ボスの索敵距離設定
-			maxSightDistance = FMath::Max(2000.f, m_enemy->GetChaseRange());
-		}
-		else
-		{
-			//ラストボスの索敵距離設定
-			maxSightDistance = m_enemy->GetChaseRange() * 1.5f;
-		}
-
-		//プレイヤーが視認距離内にいる場合だけ遮蔽物をLine Traceで確認する
-		if (distanceToPlayer <= maxSightDistance)
-		{
-			//敵の視点からプレイヤーまでの遮蔽物を受け取る結果
-			FHitResult hitResult;
-			//自身を射線判定から除外するためのCollision Query設定
-			FCollisionQueryParams collisionParams;
-			collisionParams.AddIgnoredActor(m_enemy);
-
-			//目線の高さ同士で間に障害物がないかレイトレースで確認する
-			//敵の目線高さから開始する射線位置
-			FVector start = m_enemy->GetActorLocation() + FVector(0, 0, 80.f);
-			//プレイヤーの目線高さを狙う射線終端
-			FVector end = m_targetActor->GetActorLocation() + FVector(0, 0, 80.f);
-
-			//敵とプレイヤーの間に遮蔽物があるか示す変数
-			bool bHit = GetWorld()->LineTraceSingleByChannel(hitResult, start, end, ECC_Visibility, collisionParams);
-
-			//障害物がないかプレイヤー自身に当たった場合は見えていると判定する
-			if (!bHit || hitResult.GetActor() == m_targetActor) { bCanSee = true; }
-		}
-	}
-	else
-	{
-		//雑魚敵の場合は通常の視野角に基づく判定を行う
-		bCanSee = LineOfSightTo(m_targetActor);
-	}
+	//従来の状態機械でもBehavior Treeと同じ視野角を使用する
+	const bool bCanSee = CanObserveTarget(m_targetActor);
 
 	//視界の状態が切り替わった場合のみ処理を実行する
 	if (bCanSee != m_lastCanSeePlayer)

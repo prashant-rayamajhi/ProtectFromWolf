@@ -32,7 +32,9 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 {
 	GENERATED_BODY()
 
-  public:
+public:
+	//退避や戦闘へ切り替える前に警戒歩行の速度を解除する関数
+	void RestoreAlertPace();
 	//敵の認識、移動、攻撃を管理するAI Controllerを初期化する関数
 	AEnemyAIController();
 
@@ -42,6 +44,7 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	//敵キャラクターを操作し始めた際の関数
 	virtual void OnPossess(APawn *_pawn) override;
 
+	UFUNCTION(BlueprintPure, Category = "AI")
 	bool IsUsingBehaviorTree() const
 	{
 		return m_usingBehaviorTree;
@@ -67,6 +70,15 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	bool HasRecentVisualContact(float _memorySeconds = 5.f) const;
 	//最後の判明しているプレイヤー位置を取得する関数
 	FVector GetLastKnownPlayerLocation() const;
+	//視覚、物音、味方の報告から戦闘を継続すべきか判定する関数
+	UFUNCTION(BlueprintPure, Category = "AI|Perception")
+	bool HasCombatAwareness() const;
+	//視野角、視認距離、遮蔽物をすべて満たす相手だけを直接視認する関数
+	bool CanObserveTarget(const AActor *_target) const;
+	//現在の射線と戦闘記憶をBlackboardへ反映する関数
+	void RefreshCombatAwareness();
+	//味方が直接確認した位置と時刻を受け取り、捜索先を更新する関数
+	void NotifyTeamContact(AActor *_player, const FVector &_location, float _seenTime);
 
   protected:
 	//状態処理を更新する関数
@@ -91,6 +103,14 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	void UpdateWeaponState();
 
   private:
+	//味方への発見報告を毎フレーム繰り返さないための次回送信時刻
+	float m_nextTeamAlertTime = 0.f;
+	//味方がプレイヤーを直接確認した時刻。伝聞の再送で延長しない
+	float m_teamSeenTime = -BIG_NUMBER;
+	//自分から見えていないときに捜索する、味方が最後に確認した位置
+	FVector m_teamSeenLocation = FVector::ZeroVector;
+	//同じ戦闘空間の生存中の味方へ、自分の発見情報だけを伝える関数
+	void ShareVisualContact(AActor *_player, const FVector &_location);
 	//隠れる場所を探す関数
 	bool FindCoverSpot(FVector &_outCoverSpot);
 
@@ -205,4 +225,10 @@ class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 	float m_btPerceptionRefreshTime;
 	//次の待機復帰時刻
 	float m_btIdleRecoveryTime;
+	//警戒歩行を解除した時に戻す移動速度
+	float m_beforeAlertSpeed = 0.f;
+	//警戒歩行中に他の速度変更を上書きしないための適用速度
+	float m_alertSpeed = 0.f;
+	//未発見の物音を慎重に調べている状態
+	bool m_cautious = false;
 };

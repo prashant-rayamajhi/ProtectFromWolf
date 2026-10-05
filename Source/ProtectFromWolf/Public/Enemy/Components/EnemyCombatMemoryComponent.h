@@ -77,8 +77,28 @@ class PROTECTFROMWOLF_API UEnemyCombatMemoryComponent : public UActorComponent
 	{
 		return m_stationaryHabit;
 	}
+	//視認中に攻撃を継続していた時間の割合を取得する関数
+	float GetAttackHabit() const { return m_attackHabit; }
+	//同じ足場に留まる様子を実際に見た時間から居座りの強さを返す関数
+	float GetHoldPressure() const { return FMath::Clamp(m_holdTime / 6.f, 0.f, 1.f); }
+	//実際に生成できた銃弾の数を記録する関数
+	void RecordShot();
+	//自分の銃弾がプレイヤーへダメージを与えた結果を記録する関数
+	void RecordShotHit();
+	//射撃を試しても成果が出ていない度合いを返す関数
+	float GetShotFailure() const;
 
   private:
+	//最近の射撃結果を評価する発射回数
+	float m_shotCount = 0.f;
+	//最近の射撃でプレイヤーへダメージを与えた回数
+	float m_shotHits = 0.f;
+	//最後に観測した足場から離れたかを比較する基準位置
+	FVector m_holdPosition = FVector::ZeroVector;
+	//同じ足場に留まっていることを視認できた秒数
+	float m_holdTime = 0.f;
+	//初回の観測位置が登録済みかを示す変数
+	bool m_hasHoldPosition = false;
 	//プレイヤーとの距離と直近の被弾からボスの攻守姿勢を更新する関数
 	void UpdatePosture();
 	//戦闘記憶の経過時間判定へ使用する現在のゲーム時間を返す関数
@@ -110,6 +130,8 @@ class PROTECTFROMWOLF_API UEnemyCombatMemoryComponent : public UActorComponent
 	float m_aimHabit;
 	//プレイヤーがその場へ留まる頻度を表す割合
 	float m_stationaryHabit;
+	//攻撃を連続する相手に遮蔽物で対抗するための観測割合
+	float m_attackHabit = 0.f;
 	//戦闘記憶継続時間
 	float m_combatMemoryDuration;
 	//ボスが攻撃頻度を調整するためのプレイヤー攻撃圧力

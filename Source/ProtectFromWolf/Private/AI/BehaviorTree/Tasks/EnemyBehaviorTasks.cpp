@@ -12,6 +12,9 @@
 #include "AI/Controllers/EnemyAIController.h"
 #include "Navigation/PathFollowingComponent.h"
 #include "EngineUtils.h"
+#include "Enemy/EnemyTeamTactics.h"
+#include "NavigationPath.h"
+#include "Kismet/GameplayStatics.h"
 
 //敵の行動タスクに関する定数、列挙型、構造体、関数を定義する
 namespace
@@ -79,7 +82,9 @@ bool SharesCombatGroup(const AEnemyChara *_left, const AEnemyChara *_right)
 bool CanClaimMeleeAttackSlot(AEnemyChara *_enemy)
 {
 	//近接攻撃スロットは、ミニオンランクの敵のみが取得できる
-	if (!_enemy || _enemy->m_enemyRank != EEnemyRank::Minion) { return true; }
+	//ボスも近接担当の予約を確認し、味方が二体斬り込んでいる間は同じ場所へ割り込まない
+	if (!_enemy) { return false; }
+	if (!FEnemyTeamTactics::CanApproachMelee(_enemy, UGameplayStatics::GetPlayerPawn(_enemy->GetWorld(), 0))) { return false; }
 
 	//近接攻撃スロットを取得できるかを判定するために、同じ戦闘グループに属する他の敵の数をカウントする
 	int32 committedMeleeAttackers = 0;
@@ -89,14 +94,18 @@ bool CanClaimMeleeAttackSlot(AEnemyChara *_enemy)
 		//同じ戦闘グループに属する敵の中で、近接攻撃を行っている敵の数をカウントする
 		AEnemyChara *peer = *iterator;
 		//死亡済み、自身、別の攻撃方式、別戦闘空間の敵を集計から除外する
-		if (!IsValid(peer) || peer == _enemy || peer->GetHealthRatio() <= 0.f || peer->m_enemyRank != EEnemyRank::Minion ||
+		if (!IsValid(peer) || peer == _enemy || peer->GetHealthRatio() <= 0.f ||
 			peer->m_currentStyle != EEnemyAttackStyle::Melee || !SharesCombatGroup(_enemy, peer))
 		{
 			continue;
 		}
 
 		//近接攻撃を行っている敵の数が2以上の場合、近接攻撃スロットを取得できないと判定する
-		if (peer->IsAttacking() && ++committedMeleeAttackers >= 2) { return false; }
+		if (peer->IsAttacking() && (peer->m_enemyRank != EEnemyRank::Minion || ++committedMeleeAttackers >= 2)) { return false; }
+		//攻撃可能なボスへ短く攻撃枠を譲り、雑魚二体の連続攻撃でボスが永久に待たされることを防ぐ
+		if (_enemy->m_enemyRank == EEnemyRank::Minion && peer->m_enemyRank != EEnemyRank::Minion && peer->CanSeePlayer() &&
+			peer->m_combatMemoryComponent && peer->m_combatMemoryComponent->CanUseAction(TEXT("BasicAttack"), 3.f) &&
+			peer->IsTargetWithinMeleeStrikeRange(UGameplayStatics::GetPlayerPawn(_enemy->GetWorld(), 0))) { return false; }
 	}
 	return true;
 }
@@ -137,7 +146,7 @@ void IssueCoverMove(AAIController *_controller, AEnemyChara *_enemy)
 	//カバー移動要求を消費できる場合、AIコントローラーにカバー移動を指示する
 	if (_enemy->m_coverComponent->ConsumeCoverMoveRequest())
 	{
-		_controller->MoveToLocation(_enemy->m_coverComponent->GetCoverDestination(), 35.f, true, true, true, true);
+		_controller->MoveToLocation(_enemy->m_coverComponent->GetCoverDestination(), 35.f, false, true, true, true);
 	}
 }
 
@@ -152,21 +161,25 @@ bool HandleTacticalReload(AAIController *_controller, AEnemyChara *_enemy, AActo
 	//コンバットコンポネントのプレッシャー状態を確認し、必要に応じて武器を切り替える
 	UEnemyCombatMemoryComponent *memory = _enemy->m_combatMemoryComponent;
 	//プレッシャーを受けたボスは距離に応じて近接またはレーザーへ切り替える
-	if (_enemy->m_enemyRank != EEnemyRank::Minion && memory && memory->IsUnderPressure())
+	if (_enemy->m_enemyRank != EEnemyRank::Minion && memory && memory->IsUnderPressure() && memory->GetTargetDistance() < 450.f)
 	{
+		if (_enemy->m_coverComponent) { _enemy->m_coverComponent->FinishCoverUse(); }
 		_enemy->SwitchWeapon(memory->GetTargetDistance() <= BossSafeReloadDistance ? EEnemyAttackStyle::Melee : EEnemyAttackStyle::Laser);
 		return true;
 	}
 
 	//カバーコンポネントを取得し、カバー移動中かどうかを確認する
 	UEnemyCoverComponent *cover = _enemy->m_coverComponent;
-	//確保済みの遮蔽物がある場合は到着してからリロードする
+	//確保済みの遮蔽物へ走って戻りながらリロードする
 	if (cover && cover->IsUsingCover())
 	{
+		if (cover->IsPeeking()) { cover->ReturnToCover(); }
 		//カバー移動中でない場合、AIコントローラーにカバー移動を指示する
 		if (!cover->UpdateAndIsAtCover())
 		{
 			IssueCoverMove(_controller, _enemy);
+			cover->BeginReloadRun();
+			_enemy->PeformReload();
 			return true;
 		}
 
@@ -180,10 +193,12 @@ bool HandleTacticalReload(AAIController *_controller, AEnemyChara *_enemy, AActo
 	//カバーが存在する場合、最適なカバー位置を検索し、カバー移動を指示する
 	FVector coverLocation;
 	//利用中の遮蔽物がない場合は安全にリロードできる遮蔽物を探す
-	if (cover && cover->FindBestCover(_target, coverLocation))
+	if (cover && cover->FindBestCover(_target, coverLocation, true))
 	{
 		cover->CommitCover(coverLocation);
 		IssueCoverMove(_controller, _enemy);
+		cover->BeginReloadRun();
+		_enemy->PeformReload();
 		return true;
 	}
 
@@ -192,11 +207,16 @@ bool HandleTacticalReload(AAIController *_controller, AEnemyChara *_enemy, AActo
 	//遮蔽物を確保できない場合は緊急回避地点へ移動する
 	if (cover && cover->FindDodgeLocation(_target, dodgeLocation, true))
 	{
-		cover->CommitReposition();
-		_controller->MoveToLocation(dodgeLocation, 20.f, true, true, true, true);
+		//退避先を予約し、走行する脚と補充する上半身を同時に再生する
+		cover->CommitCover(dodgeLocation);
+		IssueCoverMove(_controller, _enemy);
+		cover->BeginReloadRun();
+		_enemy->PeformReload();
+		return true;
 	}
 
 	//AIコントローラーの移動を停止し、ターゲットに向かってリロードを実行する
+	_controller->StopMovement();
 	_enemy->FaceTarget(_target);
 	_enemy->PeformReload();
 	return true;
@@ -234,67 +254,36 @@ bool FindMeleeFormationPosition(AEnemyChara *_enemy, AActor *_target, FVector &_
 	const float angle = 2.f * PI * static_cast<float>(slotIndex) / static_cast<float>(slotCount);
 
 	//近接攻撃スタイルの敵のフォーメーション位置を計算する
-	const float formationRadius = slotIndex < 3 ? 185.f : 360.f;
-	const FVector desiredPosition = _target->GetActorLocation() + FVector(FMath::Cos(angle), FMath::Sin(angle), 0.f) * formationRadius;
+	const bool approaching = FEnemyTeamTactics::CanApproachMelee(_enemy, _target) && _enemy->CanReachMeleeHeight(_target);
+	const float formationRadius = approaching ? 185.f : 420.f;
 
 	//ナビゲーションシステムを使用して、フォーメーション位置をナビゲーションメッシュ上に投影する
 	UNavigationSystemV1 *navigation = UNavigationSystemV1::GetCurrent(_enemy);
 	//近接陣形の候補をNavMesh上へ補正した移動先
-	FNavLocation projectedPosition;
-	//陣形候補をNavMesh上へ補正できない場合は近接配置を失敗として返す
-	if (!navigation || !navigation->ProjectPointToNavigation(desiredPosition, projectedPosition)) { return false; }
-
-	//フォーメーション位置を出力パラメータに設定する
-	_outPosition = projectedPosition.Location;
-	//フォーメーション位置の取得に成功した場合、trueを返す
-	return true;
+	if (!navigation) { return false; }
+	//一つの位置が塞がっても、左右と外側の候補を調べて味方から間隔を取る
+	for (float extraRadius : {0.f, 160.f, 320.f})
+	for (float offset : {0.f, 30.f, -30.f, 60.f, -60.f, 90.f, -90.f, 180.f})
+	{
+		const float direction = angle + FMath::DegreesToRadians(offset);
+		const FVector desired = _target->GetActorLocation() + FVector(FMath::Cos(direction), FMath::Sin(direction), 0.f) * (formationRadius + extraRadius);
+		FNavLocation projectedPosition;
+		if (!navigation->ProjectPointToNavigation(desired, projectedPosition, FVector(80.f, 80.f, 350.f))) { continue; }
+		if (FEnemyTeamTactics::IsOccupied(_enemy, projectedPosition.Location, 160.f)) { continue; }
+		UNavigationPath *path = navigation->FindPathToLocationSynchronously(_enemy, _enemy->GetActorLocation(), projectedPosition.Location, _enemy);
+		if (!path || !path->IsValid() || path->IsPartial()) { continue; }
+		//待機役が相手の正面を横切って反対側へ抜けないようにする
+		if (!approaching && !FEnemyTeamTactics::IsSafeCombatPath(path->PathPoints, _target->GetActorLocation())) { continue; }
+		_outPosition = projectedPosition.Location;
+		return true;
+	}
+	return false;
 }
 
-//敵が遠距離攻撃のフォーメーション位置を取得できるかを判定する関数
+//射線と味方の位置を確認して遠距離支援位置を選ぶ関数
 bool FindRangedFormationPosition(AEnemyChara *_enemy, AActor *_target, FVector &_outPosition)
 {
-	//遠距離攻撃のフォーメーション位置を取得するために、同じ戦闘グループに属する遠距離攻撃スタイルの敵を収集する
-	if (!_enemy || !_target) { return false; }
-	//同じ戦闘空間で遠距離陣形へ参加する敵の一覧
-	TArray<AEnemyChara *> rangedEnemies;
-
-	//同じ戦闘グループに属する遠距離攻撃スタイルの敵を収集する
-	for (TActorIterator<AEnemyChara> iterator(_enemy->GetWorld()); iterator; ++iterator)
-	{
-		//遠距離陣形の並び順を比較する同じ戦闘グループの敵
-		AEnemyChara *peer = *iterator;
-		//死亡済みまたは別戦闘グループの敵を遠距離陣形から除外する
-		if (!IsValid(peer) || peer->GetHealthRatio() <= 0.f || peer->m_enemyRank != EEnemyRank::Minion ||
-			peer->m_currentStyle != EEnemyAttackStyle::Gun || !SharesCombatGroup(_enemy, peer) ||
-			FVector::DistSquared2D(peer->GetActorLocation(), _target->GetActorLocation()) > FMath::Square(5000.f))
-		{
-			continue;
-		}
-		rangedEnemies.Add(peer);
-	}
-	//遠距離攻撃スタイルの敵をユニークIDでソートすることで、フォーメーション位置を決定する
-	rangedEnemies.Sort([](const AEnemyChara &_left, const AEnemyChara &_right) { return _left.GetUniqueID() < _right.GetUniqueID(); });
-
-	//遠距離攻撃スタイルの敵のインデックスとスロット数を計算する
-	const int32 slotIndex = FMath::Max(rangedEnemies.IndexOfByKey(_enemy), 0);
-	const int32 slotCount = FMath::Max(rangedEnemies.Num(), 4);
-
-	//遠距離攻撃スタイルの敵のフォーメーション位置を計算する
-	const float angle = 2.f * PI * (static_cast<float>(slotIndex) + 0.5f) / static_cast<float>(slotCount);
-	//隣接する射撃役が重ならないよう交互に切り替える陣形半径
-	const float radius = (slotIndex % 2 == 0) ? 1000.f : 1300.f;
-	const FVector desiredPosition = _target->GetActorLocation() + FVector(FMath::Cos(angle), FMath::Sin(angle), 0.f) * radius;
-
-	//ナビゲーションシステムを使用して、フォーメーション位置をナビゲーションメッシュ上に投影する
-	UNavigationSystemV1 *navigation = UNavigationSystemV1::GetCurrent(_enemy);
-	//遠距離陣形の候補をNavMesh上へ補正した移動先
-	FNavLocation projectedPosition;
-	//陣形候補をNavMesh上へ補正できない場合は遠距離配置を失敗として返す
-	if (!navigation || !navigation->ProjectPointToNavigation(desiredPosition, projectedPosition, FVector(350.f, 350.f, 450.f))) { return false; }
-
-	//フォーメーション位置を出力パラメータに設定する
-	_outPosition = projectedPosition.Location;
-	return true;
+	return FEnemyTeamTactics::FindFirePosition(_enemy, _target, _outPosition);
 }
 }
 
@@ -314,76 +303,54 @@ EBTNodeResult::Type UBTTask_EnemyAttack::ExecuteTask(UBehaviorTreeComponent &_ow
 	AActor *targetActor = blackboard ? Cast<AActor>(blackboard->GetValueAsObject(EnemyBlackboardKeys::TargetActor)) : nullptr;
 
 	//いずれかのコンポーネントが無効な場合、タスクを失敗として終了する
-	if (!controller || !enemy || !targetActor) { return EBTNodeResult::Failed; }
+	if (!controller || !enemy || !targetActor || enemy->IsKnockedBack()) { return EBTNodeResult::Failed; }
+	//射撃終了通知で収納状態になっていても、次の攻撃前に構え直す
+	if (!enemy->IsWeaponReady())
+	{
+		enemy->StopCombatIdleAnimation();
+		if (enemy->GetWeaponState() == EWeaponState::Holstered) { enemy->DrawWeapon(); }
+		return EBTNodeResult::Succeeded;
+	}
 
 	//戦術的リロードを処理し、成功した場合はタスクを成功として終了する
 	if (HandleTacticalReload(controller, enemy, targetActor)) { return EBTNodeResult::Succeeded; }
 	//別の攻撃またはリロードが進行中の場合は新しい攻撃を開始しない
-	if (enemy->IsAttacking() || enemy->IsReloading()) { return EBTNodeResult::Failed; }
+	if (enemy->IsAttacking() || enemy->IsReloading() || enemy->m_isSwitchingWeapon) { return EBTNodeResult::Succeeded; }
 
 	//敵の戦闘アイドルアニメーションを停止する
 	enemy->StopCombatIdleAnimation();
 
-	//ミニオンランクの敵で、銃攻撃スタイルを持ち、カバーコンポーネントが存在し、カバーを使用している場合の処理
-	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
-		enemy->m_coverComponent->IsUsingCover())
-	{
-		//カバーを使用している場合、カバー位置に到達していない場合はカバー移動を指示する
-		if (!enemy->m_coverComponent->UpdateAndIsAtCover())
-		{
-			//カバー移動中でない場合、カバー移動要求をリセットする
-			if (controller->GetMoveStatus() != EPathFollowingStatus::Moving) { enemy->m_coverComponent->ResetCoverMoveRequest(); }
-			//カバー移動要求を消費できる場合、AIコントローラーにカバー移動を指示する
-			if (enemy->m_coverComponent->ConsumeCoverMoveRequest())
-			{
-				controller->MoveToLocation(enemy->m_coverComponent->GetCoverDestination(), 35.f, true, true, true, true);
-			}
-			return EBTNodeResult::Succeeded;
-		}
-
-		//カバー位置に到達している場合、カバーを保持するかどうかを判定し、保持する場合は移動を停止し、攻撃を停止し、武器を下げる
-		if (enemy->m_coverComponent->ShouldHoldCover())
-		{
-			controller->StopMovement();
-			controller->ClearFocus(EAIFocusPriority::Gameplay);
-			enemy->StopFiring();
-			enemy->LowerWeapon();
-			enemy->SetActionState(EActionState::Idle);
-			return EBTNodeResult::Succeeded;
-		}
-		//カバーを保持しない場合、カバー使用を終了する
-		else { enemy->m_coverComponent->FinishCoverUse(); }
-	}
-	//ミニオンランクの敵で、銃攻撃スタイルを持ち、カバーコンポーネントが存在し、カバーを使用していない場合の処理
-	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
-		!enemy->m_coverComponent->IsUsingCover() && enemy->m_combatMemoryComponent && enemy->m_combatMemoryComponent->GetTargetDistance() > 850.f &&
-		(enemy->m_combatMemoryComponent->IsPlayerAiming() || enemy->m_combatMemoryComponent->IsPlayerAttacking() ||
-		 enemy->m_combatMemoryComponent->IsUnderPressure()))
-	{
-		//カバーを使用していない場合、最適なカバー位置を検索し、カバー移動を指示する
-		FVector coverLocation;
-		//射線を遮る有効な候補がある場合は遮蔽物の利用を開始する
-		if (enemy->m_coverComponent->FindBestCover(targetActor, coverLocation))
-		{
-			//カバー位置に移動する前に、攻撃を停止し、カバーをコミットする
-			enemy->StopFiring();
-			enemy->m_coverComponent->CommitCover(coverLocation);
-			//新しい遮蔽移動要求を確定できた場合だけAIへ経路移動を指示する
-			if (enemy->m_coverComponent->ConsumeCoverMoveRequest())
-			{
-				const EPathFollowingRequestResult::Type moveResult = controller->MoveToLocation(coverLocation, 35.f, true, true, true, true);
-
-				//カバー移動が失敗した場合、カバー使用を終了する
-				//遮蔽位置までの経路を作れない場合は確保状態を解除する
-				if (moveResult == EPathFollowingRequestResult::Failed) { enemy->m_coverComponent->FinishCoverUse(); }
-			}
-			//カバー移動を指示した場合、タスクを成功として終了する
-			return EBTNodeResult::Succeeded;
-		}
-	}
+	//遮蔽物での待機と射撃位置への移動は共通サービスへ任せる
+	if (enemy->m_coverComponent && enemy->m_coverComponent->IsUsingCover() && !enemy->m_coverComponent->HasFiringWindow()) { return EBTNodeResult::Succeeded; }
 	//AIコントローラーにターゲットをフォーカスさせ、敵キャラクターにターゲットを向かせる
 	controller->SetFocus(targetActor);
-	enemy->FaceTarget(targetActor);
+	//移動中は進行方向への回転を維持し、射撃準備との回転競合を防ぐ
+	if (controller->GetMoveStatus() != EPathFollowingStatus::Moving) { enemy->FaceTarget(targetActor); }
+	//味方と重なって射撃する場合は、空いている別角度の射線へ移動する
+	if (enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent && enemy->GetDistanceTo(targetActor) >= 650.f &&
+		FEnemyTeamTactics::IsOccupied(enemy, enemy->GetActorLocation(), 280.f))
+	{
+		FVector firePosition;
+		if (enemy->m_coverComponent->CanReposition() && FEnemyTeamTactics::FindFirePosition(enemy, targetActor, firePosition))
+		{
+			enemy->m_coverComponent->CommitReposition();
+			controller->MoveToLocation(firePosition, 45.f, false, true, true, true);
+			return EBTNodeResult::Succeeded;
+		}
+	}
+	//遮蔽物への退避は上で保護し、開けた場所での射線探索だけは途中の射撃機会を利用する
+	if (enemy->m_currentStyle != EEnemyAttackStyle::Melee && controller->GetMoveStatus() == EPathFollowingStatus::Moving)
+	{
+		const UPathFollowingComponent *path = controller->GetPathFollowingComponent();
+		const AEnemyAIController *observer = Cast<AEnemyAIController>(controller);
+		//再配置直後や被弾中は移動を続け、安全に再発見できた時だけ足を止める
+		const bool canShootHere = enemy->m_currentStyle == EEnemyAttackStyle::Gun && observer && observer->CanObserveTarget(targetActor) &&
+			enemy->m_coverComponent && !enemy->m_coverComponent->IsUsingCover() && enemy->m_coverComponent->CanReposition() &&
+			(!enemy->m_combatMemoryComponent || !enemy->m_combatMemoryComponent->IsUnderPressure()) &&
+			!FEnemyTeamTactics::IsOccupied(enemy, enemy->GetActorLocation(), 280.f);
+		if ((!path || path->GetMoveGoal() != targetActor) && !canShootHere) { return EBTNodeResult::Succeeded; }
+		if (canShootHere) { enemy->m_coverComponent->CommitReposition(); }
+	}
 
 	//近接攻撃へ参加できる空きがあるか判定するための変数
 	const bool hasMeleeAttackSlot = CanClaimMeleeAttackSlot(enemy);
@@ -395,14 +362,20 @@ EBTNodeResult::Type UBTTask_EnemyAttack::ExecuteTask(UBehaviorTreeComponent &_ow
 		//有効な陣形位置を取得できた場合だけ移動を指示する
 		if (FindMeleeFormationPosition(enemy, targetActor, supportPosition))
 		{
-			controller->MoveToLocation(supportPosition, 45.f, true, true, true, true);
+			controller->MoveToLocation(supportPosition, 45.f, false, true, true, true);
 		}
 		return EBTNodeResult::Succeeded;
 	}
-	//近接攻撃スタイルの敵で、近接攻撃を実行できない場合、ターゲットに向かって移動を指示する
+	//武器が届いたら接近移動を止めて向き直り、横向きのまま相手を通り越さない
+	if (enemy->m_currentStyle == EEnemyAttackStyle::Melee && enemy->IsTargetWithinMeleeStrikeRange(targetActor))
+	{
+		controller->StopMovement();
+		enemy->FaceTarget(targetActor);
+	}
+	//向き直った後も距離や相手の移動予測が合わない場合は接近を続ける
 	if (enemy->m_currentStyle == EEnemyAttackStyle::Melee && !enemy->CanCommitMeleeAttack(targetActor))
 	{
-		controller->MoveToActor(targetActor, enemy->GetMeleeStrikeRange(targetActor) * TargetAcceptanceRadiusMultiplier, true, true, true, nullptr,
+		controller->MoveToActor(targetActor, enemy->GetMeleeStrikeRange(targetActor) * 0.5f, false, true, true, nullptr,
 								true);
 		return EBTNodeResult::Succeeded;
 	}
@@ -449,9 +422,42 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 	AActor *targetActor = blackboard ? Cast<AActor>(blackboard->GetValueAsObject(EnemyBlackboardKeys::TargetActor)) : nullptr;
 
 	//いずれかのコンポーネントが無効な場合、タスクを失敗として終了する
-	if (!controller || !enemy || !targetActor) { return EBTNodeResult::Failed; }
+	if (!controller || !enemy || !targetActor || enemy->IsKnockedBack()) { return EBTNodeResult::Failed; }
 	//リロードまたは安全地点への移動を開始した場合は移動Taskを完了する
 	if (HandleTacticalReload(controller, enemy, targetActor)) { return EBTNodeResult::Succeeded; }
+	//遮蔽移動を最後の目撃位置への追跡で上書きしない
+	if (enemy->m_coverComponent && enemy->m_coverComponent->IsUsingCover()) { return EBTNodeResult::Succeeded; }
+
+	//射撃型は相手本人へ突進せず、射線が通る別角度の位置を選ぶ
+	if (enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent)
+	{
+		AEnemyAIController *rangedController = Cast<AEnemyAIController>(controller);
+		if (controller->GetMoveStatus() == EPathFollowingStatus::Moving) { return EBTNodeResult::Succeeded; }
+		if (rangedController && !rangedController->HasActiveVisualContact())
+		{
+			//味方から聞いた位置を見渡せる場所へ展開し、壁越しの現在位置は使わない
+			const FVector lastSeen = rangedController->GetLastKnownPlayerLocation();
+			controller->SetFocalPoint(lastSeen);
+			FVector searchPosition;
+			if (enemy->m_coverComponent->CanReposition() && FEnemyTeamTactics::CanRelocate(enemy))
+			{
+				enemy->m_coverComponent->CommitReposition();
+				if (FEnemyTeamTactics::FindFirePosition(enemy, targetActor, searchPosition, &lastSeen))
+				{
+					controller->MoveToLocation(searchPosition, 45.f, false);
+				}
+			}
+			return EBTNodeResult::Succeeded;
+		}
+		FVector position;
+		if (enemy->m_coverComponent->CanReposition() && FEnemyTeamTactics::CanRelocate(enemy) &&
+			FEnemyTeamTactics::FindFirePosition(enemy, targetActor, position))
+		{
+			enemy->m_coverComponent->CommitReposition();
+			controller->MoveToLocation(position, 45.f, false);
+		}
+		return EBTNodeResult::Succeeded;
+	}
 
 	//敵のAIコントローラーが視覚的接触を持っていない場合、最近の視覚的接触またはプレイヤーのノイズを確認し、既知の位置がない場合はターゲットアクターの位置を通知する
 	AEnemyAIController *enemyController = Cast<AEnemyAIController>(controller);
@@ -459,14 +465,9 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 	if (enemyController && !enemyController->HasActiveVisualContact())
 	{
 		//敵のAIコントローラーが最近の視覚的接触またはプレイヤーのノイズを持っていない場合、ターゲットアクターの位置を通知する
-		bool hasKnownLocation = enemyController->HasRecentVisualContact() || enemyController->HasRecentPlayerNoise();
-		//戦闘開始直後のArena内では現在のプレイヤー位置を認識情報へ補う
-		if (!hasKnownLocation && enemy->Tags.ContainsByPredicate([](const FName &_tag) { return _tag.ToString().StartsWith(TEXT("CombatRoom_")); }))
-		{
-			//敵のAIコントローラーにターゲットアクターの位置を通知する
-			enemyController->NotifyPlayerNoise(targetActor, targetActor->GetActorLocation());
-			hasKnownLocation = true;
-		}
+		bool hasKnownLocation = enemyController->HasCombatAwareness();
+		//視覚と物音の記憶が切れたら、実際の位置を盗み見ず巡回による再探索へ戻す
+		if (!hasKnownLocation) { return EBTNodeResult::Failed; }
 		//敵のAIコントローラーが既知の位置を持っている場合、フォーカスをクリアし、最近の視覚的接触またはプレイヤーのノイズの位置に移動する
 		if (hasKnownLocation)
 		{
@@ -477,83 +478,47 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 	}
 	//敵の戦闘アイドルアニメーションを停止する
 	enemy->StopCombatIdleAnimation();
-	//遮蔽物を使用中の遠距離ミニオンを確保済みの位置まで移動させる
-	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
-		enemy->m_coverComponent->IsUsingCover())
-	{
-		//カバーを使用している場合、カバー位置に到達していない場合はカバー移動を指示する
-		if (!enemy->m_coverComponent->UpdateAndIsAtCover())
-		{
-			//カバー移動中でない場合、カバー移動要求をリセットする
-			if (controller->GetMoveStatus() != EPathFollowingStatus::Moving) { enemy->m_coverComponent->ResetCoverMoveRequest(); }
-			//カバー移動要求を消費できる場合、AIコントローラーにカバー移動を指示する
-			if (enemy->m_coverComponent->ConsumeCoverMoveRequest())
-			{
-				controller->MoveToLocation(enemy->m_coverComponent->GetCoverDestination(), 35.f, true, true, true, true);
-			}
-			return EBTNodeResult::Succeeded;
-		}
-		//カバー位置に到達している場合、カバーを保持するかどうかを判定し、保持する場合は移動を停止し、攻撃を停止し、武器を下げる
-		if (enemy->m_coverComponent->ShouldHoldCover())
-		{
-			controller->StopMovement();
-			controller->ClearFocus(EAIFocusPriority::Gameplay);
-			enemy->StopFiring();
-			enemy->LowerWeapon();
-			enemy->SetActionState(EActionState::Idle);
-			return EBTNodeResult::Succeeded;
-		}
-		//カバーを保持しない場合、カバー使用を終了する
-		enemy->m_coverComponent->FinishCoverUse();
-	}
 	//敵のAIコントローラーにターゲットアクターをフォーカスさせる
 	controller->SetFocus(targetActor);
 
-	//ミニオンランクの敵で、銃攻撃スタイルを持ち、カバーコンポーネントが存在し、カバーを使用していない場合の処理
-	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
-		!enemy->m_coverComponent->IsUsingCover() && enemy->m_combatMemoryComponent && enemy->m_combatMemoryComponent->GetTargetDistance() > 850.f &&
-		(enemy->m_combatMemoryComponent->IsPlayerAiming() || enemy->m_combatMemoryComponent->IsPlayerAttacking() ||
-		 enemy->m_combatMemoryComponent->IsUnderPressure()))
+	//撃たれている近接型は、前進できる遮蔽物を短い中継点として使う
+	if (enemy->m_currentStyle == EEnemyAttackStyle::Melee && enemy->m_coverComponent && enemy->m_combatMemoryComponent &&
+		enemy->m_combatMemoryComponent->GetTargetDistance() > 850.f &&
+		(enemy->m_combatMemoryComponent->IsPlayerAttacking() || enemy->m_combatMemoryComponent->IsUnderPressure()))
 	{
-		//カバーを使用していない場合、最適なカバー位置を検索し、カバー移動を指示する
-		FVector coverLocation;
-		//プレイヤーの射線を遮る候補を取得できた場合は遮蔽移動を開始する
-		if (enemy->m_coverComponent->FindBestCover(targetActor, coverLocation))
+		FVector approachCover;
+		if (enemy->m_coverComponent->FindBestCover(targetActor, approachCover))
 		{
-			//カバー位置に移動する前に、攻撃を停止し、カバーをコミットする
-			enemy->StopFiring();
-			enemy->m_coverComponent->CommitCover(coverLocation);
-			//新しい遮蔽移動要求が確定した場合だけAIへ移動を指示する
-			if (enemy->m_coverComponent->ConsumeCoverMoveRequest())
-			{
-				//AIコントローラーにカバー移動を指示する
-				const EPathFollowingRequestResult::Type moveResult = controller->MoveToLocation(coverLocation, 35.f, true, true, true, true);
-				if (moveResult == EPathFollowingRequestResult::Failed) { enemy->m_coverComponent->FinishCoverUse(); }
-			}
-			return EBTNodeResult::Succeeded;
-		}
-
-		//遮蔽物を取得できない時にプレイヤーの射線から外れる回避先
-		FVector dodgeLocation;
-		//NavMesh上に回避先がある場合は再配置として移動する
-		if (enemy->m_coverComponent->FindDodgeLocation(targetActor, dodgeLocation))
-		{
-			enemy->m_coverComponent->CommitReposition();
-			controller->MoveToLocation(dodgeLocation, 20.f, true, true, true, true);
+			enemy->m_coverComponent->CommitCover(approachCover);
+			IssueCoverMove(controller, enemy);
 			return EBTNodeResult::Succeeded;
 		}
 	}
-
 	//近接ミニオンをプレイヤー周囲へ分散させるための陣形位置
 	FVector formationPosition;
 	//有効な近接陣形位置を取得できた場合は攻撃距離まで移動する
-	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Melee &&
+	if (enemy->m_currentStyle == EEnemyAttackStyle::Melee &&
 		FindMeleeFormationPosition(enemy, targetActor, formationPosition))
 	{
-		controller->MoveToLocation(formationPosition, 45.f, true, true, true, true);
+		//包囲位置は通過点とし、到着後に攻撃枠が空いていれば武器が届く距離まで詰める
+		if (CanClaimMeleeAttackSlot(enemy) && enemy->CanReachMeleeHeight(targetActor) &&
+			FVector::DistSquared2D(enemy->GetActorLocation(), formationPosition) <= FMath::Square(65.f))
+		{
+			controller->MoveToActor(targetActor, enemy->GetMeleeStrikeRange(targetActor) * 0.5f, false, true, true, nullptr, true);
+			return EBTNodeResult::Succeeded;
+		}
+		//カプセル半径で早く到着扱いにせず、次の接近判定に入れる位置まで進む
+		controller->MoveToLocation(formationPosition, 45.f, false, true, true, true);
 		return EBTNodeResult::Succeeded;
 	}
 	//有効な射撃陣形位置を取得できた場合は他の敵と重ならない位置へ移動する
+	//包囲位置が塞がっている時も全員で相手の足元へ向かわず、次の判断で別候補を探す
+	if (enemy->m_currentStyle == EEnemyAttackStyle::Melee &&
+		(!FEnemyTeamTactics::CanApproachMelee(enemy, targetActor) || !enemy->CanReachMeleeHeight(targetActor)))
+	{
+		controller->StopMovement();
+		return EBTNodeResult::Succeeded;
+	}
 	if (enemy->m_enemyRank == EEnemyRank::Minion && enemy->m_currentStyle == EEnemyAttackStyle::Gun &&
 		FindRangedFormationPosition(enemy, targetActor, formationPosition))
 	{
@@ -562,10 +527,8 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 	}
 
 	//AIコントローラーにターゲットアクターに移動するよう指示する
-	controller->MoveToActor(targetActor,
-							(enemy->m_currentStyle == EEnemyAttackStyle::Melee ? enemy->GetMeleeStrikeRange(targetActor) : enemy->GetAttackRange()) *
-								TargetAcceptanceRadiusMultiplier,
-							true, true, true, nullptr, true);
+	const float approachRange = enemy->GetEffectiveAttackRange(targetActor) * TargetAcceptanceRadiusMultiplier;
+	controller->MoveToActor(targetActor, approachRange, false, true, true, nullptr, true);
 	return EBTNodeResult::Succeeded;
 }
 
@@ -590,6 +553,14 @@ EBTNodeResult::Type UBTTask_EnemyPatrol::ExecuteTask(UBehaviorTreeComponent &_ow
 
 	//敵キャラクターを取得し、戦闘アイドルアニメーションを停止し、攻撃を停止し、武器を下げる
 	AEnemyChara *enemy = Cast<AEnemyChara>(enemyPawn);
+	if (enemy && enemy->IsKnockedBack()) { return EBTNodeResult::Failed; }
+	//古い分岐結果で巡回へ入っても、発見済みなら射撃を止めずに戦闘へ戻す
+	if (AEnemyAIController *enemyController = Cast<AEnemyAIController>(controller))
+	{
+		enemyController->RefreshCombatAwareness();
+		if (enemyController->HasCombatAwareness()) { return EBTNodeResult::Failed; }
+	}
+	if (enemy && (enemy->IsAttacking() || enemy->IsReloading() || enemy->m_isSwitchingWeapon)) { return EBTNodeResult::Failed; }
 	//敵本体を取得できた場合は巡回用の非戦闘状態へ戻す
 	if (enemy)
 	{
@@ -686,6 +657,18 @@ void UBTTask_EnemyPatrol::TickTask(UBehaviorTreeComponent &_ownerComp, uint8 *_n
 		return;
 	}
 
+	//発見や被弾による戦闘移行を、巡回の移動完了や三秒待機より優先する
+	if (AEnemyAIController *enemyController = Cast<AEnemyAIController>(controller)) { enemyController->RefreshCombatAwareness(); }
+	const UBlackboardComponent *blackboard = _ownerComp.GetBlackboardComponent();
+	if (blackboard && (blackboard->GetValueAsBool(EnemyBlackboardKeys::CanSeeTarget) ||
+		blackboard->GetValueAsBool(EnemyBlackboardKeys::IsPaused) || blackboard->GetValueAsBool(EnemyBlackboardKeys::IsDead) ||
+		blackboard->GetValueAsBool(EnemyBlackboardKeys::IsActionLocked)))
+	{
+		controller->StopMovement();
+		FinishLatentTask(_ownerComp, EBTNodeResult::Succeeded);
+		return;
+	}
+
 	//敵が移動中の場合、移動が完了するまで待機する
 	FEnemyPatrolTaskMemory *memory = reinterpret_cast<FEnemyPatrolTaskMemory *>(_nodeMemory);
 	//移動段階では経路追従の完了を待ってから待機段階へ切り替える
@@ -751,7 +734,7 @@ EBTNodeResult::Type UBTTask_EnemyRetreat::ExecuteTask(UBehaviorTreeComponent &_o
 	AAIController *controller = _ownerComp.GetAIOwner();
 	AEnemyChara *enemy = controller ? Cast<AEnemyChara>(controller->GetPawn()) : nullptr;
 	//敵本体を取得できない場合は退避を実行せずTaskを失敗として返す
-	if (!enemy) { return EBTNodeResult::Failed; }
+	if (!enemy || enemy->IsKnockedBack()) { return EBTNodeResult::Failed; }
 
 	//敵キャラクターの移動を停止し、回避行動を実行する
 	controller->StopMovement();
