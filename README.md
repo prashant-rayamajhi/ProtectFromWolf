@@ -9,7 +9,7 @@
 - 制作期間：約3か月（2025年11月20日～2026年2月13日）
 - 制作体制：チーム制作（プログラマー3名）
 - 使用技術：Unreal Engine 5／C++（現在の改修版はUE 5.7.4）
-- [プレイ動画](https://drive.google.com/file/d/1TVYpkikDlaY0mise30JveE5y7Ndnf8Xr/view?usp=drive_link)
+- [プレイ動画](https://drive.google.com/file/d/1k1E9EClqOoNjFCqNBbwQfi-2LEg7HgVN/view?usp=drive_link)
 - [作品資料](https://drive.google.com/drive/folders/1lv9nxbNX8tpTkDl2XpudB7sLtmPInEcj)
 
 制作期間終了後の不具合修正・責務分割・コメント整理も含みます。制作当初の実装と、その後の改修は区別して説明します。
