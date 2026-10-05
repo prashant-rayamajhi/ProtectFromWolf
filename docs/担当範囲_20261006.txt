@@ -1,4 +1,5 @@
 PROTECT FROM WOLF　担当範囲
+最終更新：2026年10月6日
 
 チーム制作：プログラマー3名
 制作期間：2025年11月20日～2026年2月13日（約3か月）
@@ -18,6 +19,20 @@ PROTECT FROM WOLF　担当範囲
 敵の行動判断：距離、残弾、射線、味方や遮蔽物の状態から行動候補を評価します。
 戦闘処理：近接・銃・レーザーなどの開始条件、中断、終了と復帰を管理します。
 ボスの判断：攻撃候補の点数と再使用までの時間を使い、戦況に応じた選択を行います。機械学習で訓練したものではありません。
+敵用武器：敵の銃・弾・近接武器を扱い、射撃や命中時の処理を敵の行動と連動させます。プレイヤーの銃全体を担当したという意味ではありません。
+プレイヤーHUD：体力、変身ゲージ、残弾、命中・撃破の通知、ジャスト回避の操作案内を表示します。
+タイトル画面：開始操作、キャラクターの歩行演出、カメラの移行とゲーム開始までの表示を扱います。
+ゲームクリア・ゲームオーバー画面：結果に応じた画面表示とボタンによる遷移を扱います。
+
+主な担当コード
+変身：WerewolfFormComponent.cpp／.h
+敵用武器：EnemyGun、EnemyBullet、EnemyMeleeWeapon
+敵の戦闘：EnemyCharaCombat、EnemyCharaBoss、FireComponent、MeleeComponent
+敵AI：EnemyAIControllerと分割実装、Behavior TreeのTask・Service・Decorator
+敵の状態と判断：EnemyStateComponent、EnemyHealthComponent、EnemyDecisionComponent、EnemyCombatMemoryComponent
+遮蔽物と連携：EnemyCoverComponent、EnemyTeamTactics
+プレイヤーHUD：PlayerUI.cpp／.h
+タイトル・結果画面：TitleWidget、SciFiScreenWidget、SciFiScreenSubsystem、MenuCharacterStageと関連ヘッダー
 
 制作期間後の追加改修
 敵の停止・密集への対策、攻撃中断時の予約処理の解除、各種表示と操作案内を改修しています。
@@ -26,10 +41,12 @@ PROTECT FROM WOLF　担当範囲
 タイトル開始時の歩行・カメラ遷移、クリア・ゲームオーバー画面の処理も担当として掲載します。制作期間後の追加改修は制作当初の実装と区別します。
 
 公開コードの扱い
-GitHubは敵用武器・敵側戦闘・AI・敵システムと確認済みUIを加え、59ファイルを掲載します。
+GitHubには変身処理、敵用武器・敵側戦闘・AI・敵システムと確認済みUIを含む59ファイルを掲載しています。
 プレイヤー射撃や共通戦闘部品、マップ・素材など担当未確認の部分は単独成果として掲載しません。
-PlayerUIとタイトル・ゲームクリア・ゲームオーバー画面の処理を公開します。敵・ボスのHPウィジェットと戦闘段階UIは今回の確認範囲外です。
-分野別の掲載・除外理由はSource/README.mdを参照してください。
+PlayerUIとタイトル・ゲームクリア・ゲームオーバー画面の処理を公開しています。敵・ボスのHPウィジェットと戦闘段階UIは今回の確認範囲外です。
+画面に使う画像・音楽・モデル等の素材制作まで本人担当とするものではありません。
+リポジトリ：https://github.com/prashant-rayamajhi/ProtectFromWolf
+分野別の掲載・除外理由：https://github.com/prashant-rayamajhi/ProtectFromWolf/blob/main/Source/README.md
 
 確認範囲と残る課題
 ビルドや自動テストの成功は、全戦闘の見た目や操作感を保証するものではありません。

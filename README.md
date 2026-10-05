@@ -23,6 +23,7 @@
 
 | 分野 | 主なソース |
 | --- | --- |
+| 人型・人狼の変身と解除 | [WerewolfFormComponent.cpp](Source/ProtectFromWolf/Private/Player/WerewolfFormComponent.cpp) |
 | 敵の銃・弾・近接武器 | [Weapons](Source/ProtectFromWolf/Private/Weapons) |
 | 敵の戦闘・ボス技 | [EnemyCharaCombat.cpp](Source/ProtectFromWolf/Private/Enemy/EnemyCharaCombat.cpp)、[EnemyCharaBoss.cpp](Source/ProtectFromWolf/Private/Enemy/EnemyCharaBoss.cpp)、[Combat](Source/ProtectFromWolf/Private/Combat) |
 | 認識・捜索・行動遷移 | [AI](Source/ProtectFromWolf/Private/AI) |
@@ -84,6 +85,10 @@ GitHubの「Code → Download ZIP」やリリース欄の「Source code (zip)」
 - 敵AIの知覚、状態管理、攻撃判断、移動、遮蔽物利用
 - 敵専用の武器と敵側の戦闘処理
 - プレイヤーHUD、タイトル・ゲームクリア・ゲームオーバー画面の処理
+
+プレイヤーHUDでは体力・変身ゲージ・残弾・命中通知・ジャスト回避案内を、タイトルでは開始操作・人物の歩行演出・カメラ移行を扱っています。クリア・ゲームオーバー画面では結果に応じた表示とボタンによる画面遷移を担当しています。画像・音楽・モデルなどの素材制作まで本人の担当とするものではありません。
+
+ファイル名を含む担当範囲のまとめは[こちら](docs/担当範囲_20261006.txt)に掲載しています。プレイヤーキャラクターと射撃処理は一部担当であり、全体を単独で制作したという意味ではありません。
 
 ## 担当外・掲載しない範囲
 
