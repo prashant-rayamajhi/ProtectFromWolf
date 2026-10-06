@@ -109,7 +109,8 @@ class PROTECTFROMWOLF_API UWerewolfFormComponent : public UActorComponent
 	}
 	float GetAttackDamageMultiplier() const
 	{
-		return m_settings.m_attackDamageMultiplier;
+		//BPで調整済みの攻撃倍率を基準に、人狼の近接ダメージを二割増やす処理
+		return m_settings.m_attackDamageMultiplier * 1.2f;
 	}
 
   private:

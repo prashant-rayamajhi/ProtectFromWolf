@@ -56,7 +56,9 @@ Blackboard、状態、攻撃候補の点数、移動先などを確認し、画�
 
 ## ゲームの入手と起動
 
-[Windows版のリリース一覧](https://github.com/prashant-rayamajhi/ProtectFromWolf/releases)から`ProtectFromWolf-Windows-2026.10.06.zip`をダウンロードし、全体を展開して`Windows/ProtectFromWolf.exe`を起動します。付属フォルダも一緒に保持してください。
+[Windows版のリリース一覧](https://github.com/prashant-rayamajhi/ProtectFromWolf/releases)から`ProtectFromWolf.zip`をダウンロードし、全体を展開して`Windows/ProtectFromWolf.exe`を起動します。付属フォルダも一緒に保持してください。
+
+2026年10月6日の追加改修版には、死亡後の立ち姿への復帰を防ぐ処理と、人狼の攻撃倍率・移動速度・持続時間の調整を含みます。エディターで死亡からゲームオーバーへの遷移と変身解除後の値の復元を確認していますが、全戦闘の通しプレイや足滑りの検証が完了したという意味ではありません。
 
 GitHubが自動生成する「Source code (zip)」はゲーム本体ではありません。このリポジトリは未掲載の依存コードや素材があるため、単独ではビルド・起動できません。
 
