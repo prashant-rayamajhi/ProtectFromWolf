@@ -29,9 +29,12 @@ bool AEnemyAIController::HasCombatAwareness() const
 void AEnemyAIController::NotifyTeamContact(AActor *_player, const FVector &_location, float _seenTime)
 {
 	if (!IsValid(_player) || !GetWorld() || _seenTime <= m_teamSeenTime) { return; }
+	//初めて届いた交戦報告では巡回経路を打ち切り、報告位置の捜索へ移る
+	const bool wasAware = HasCombatAwareness();
 	m_targetActor = _player;
 	m_teamSeenTime = _seenTime;
 	m_teamSeenLocation = _location;
+	if (!wasAware && IsValid(m_enemy) && !m_enemy->IsAttacking() && !m_enemy->IsKnockedBack()) { StopMovement(); }
 	if (UBlackboardComponent *board = GetBlackboardComponent())
 	{
 		board->SetValueAsObject(EnemyBlackboardKeys::TargetActor, _player);
@@ -63,13 +66,22 @@ bool AEnemyAIController::CanObserveTarget(const AActor *_target) const
 	//警戒中も現在の体の向きを基準にし、共有された対象参照だけで全周を見ない
 	const FVector offset = _target->GetActorLocation() - m_enemy->GetActorLocation();
 	const float distance = offset.Size();
-	const float range = FMath::Max(m_enemy->GetChaseRange(), 3000.f);
+	//ボスは雑魚より遠くを確認し、戦闘空間の奥でも正面の相手を見落とさない
+	const bool boss = m_enemy->m_enemyRank != EEnemyRank::Minion;
+	float range = FMath::Max(m_enemy->GetChaseRange(), 3000.f) * (boss ? 1.5f : 1.f);
+	if (m_enemy->Tags.ContainsByPredicate([](FName _tag) { return _tag.ToString().StartsWith(TEXT("CombatRoom_")); }))
+	{
+		range = FMath::Max(range, boss ? 7500.f : 6000.f);
+	}
 	if (distance > range) { return false; }
 	const float facing = FVector::DotProduct(m_enemy->GetActorForwardVector().GetSafeNormal2D(), offset.GetSafeNormal2D());
 	//直前まで交戦していた近距離の相手は、移動で体が横を向いただけでは見失わない
 	//未発見の相手や壁越しの相手を無条件で発見する処理にはしない
-	const bool trackingNearby = distance <= 650.f && (HasRecentVisualContact(3.f) || HasRecentPlayerNoise(3.f));
-	if (distance > 250.f && facing < 0.258819f && !trackingNearby) { return false; }
+	const bool trackingNearby = distance <= 650.f && (HasRecentVisualContact(3.f) || HasRecentPlayerNoise(3.f) ||
+		(GetWorld() && GetWorld()->GetTimeSeconds() - m_teamSeenTime <= 3.f));
+	//視野は半角で判定する。距離の条件を広げても最後に遮蔽を検査する
+	const float sightDot = FMath::Cos(FMath::DegreesToRadians(boss ? 100.f : 85.f));
+	if (distance > 250.f && facing < sightDot && !trackingNearby) { return false; }
 	return LineOfSightTo(_target);
 }
 
@@ -79,11 +91,6 @@ void AEnemyAIController::RefreshCombatAwareness()
 	if (!IsValid(m_enemy) || m_enemy->IsHidden() || m_enemy->GetHealthRatio() <= 0.f) { return; }
 	if (!IsValid(m_targetActor)) { m_targetActor = UGameplayStatics::GetPlayerPawn(GetWorld(), 0); }
 	if (!IsValid(m_targetActor)) { return; }
-	float sightRange = m_enemy->GetChaseRange() * (m_enemy->m_enemyRank == EEnemyRank::Minion ? 1.f : 1.5f);
-	if (m_enemy->Tags.ContainsByPredicate([](FName _tag) { return _tag.ToString().StartsWith(TEXT("CombatRoom_")); }))
-	{
-		sightRange = FMath::Max(sightRange, 6000.f);
-	}
 	const bool visible = CanObserveTarget(m_targetActor);
 	UpdateVisualContact(m_targetActor, visible, m_targetActor->GetActorLocation());
 	m_enemy->SetCanSeePlayer(visible);

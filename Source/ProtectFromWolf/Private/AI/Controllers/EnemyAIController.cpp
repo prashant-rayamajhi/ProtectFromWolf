@@ -210,6 +210,22 @@ void AEnemyAIController::Tick(float _deltaTime)
 	}
 	//吹き飛び中は経路移動による速度の上書きを止める
 	if (IsValid(m_enemy) && m_enemy->IsKnockedBack()) { return; }
+	//接近中は毎フレーム間合いを確認し、行動ツリーの更新待ちで相手へ近づきすぎることを防ぐ
+	if (IsValid(m_enemy) && IsValid(m_targetActor) && m_enemy->m_currentStyle == EEnemyAttackStyle::Melee &&
+		m_enemy->GetActionState() == EActionState::Idle && !m_enemy->m_isSwitchingWeapon && !m_enemy->ShouldRetreat() &&
+		!(m_enemy->m_coverComponent && m_enemy->m_coverComponent->IsUsingCover()) && CanObserveTarget(m_targetActor))
+	{
+		const FVector towardTarget = (m_targetActor->GetActorLocation() - m_enemy->GetActorLocation()).GetSafeNormal2D();
+		const float stopRange = m_enemy->GetMeleeStrikeRange(m_targetActor) * 0.9f;
+		if (m_enemy->CanReachMeleeHeight(m_targetActor) &&
+			FVector::DistSquared2D(m_enemy->GetActorLocation(), m_targetActor->GetActorLocation()) <= FMath::Square(stopRange) &&
+			FVector::DotProduct(m_enemy->GetVelocity().GetSafeNormal2D(), towardTarget) > 0.5f)
+		{
+			StopMovement();
+			m_enemy->GetCharacterMovement()->StopMovementImmediately();
+			SetFocus(m_targetActor);
+		}
+	}
 	//Behavior Tree使用中は停止監視だけを更新して従来State処理を実行しない
 	if (m_usingBehaviorTree)
 	{
@@ -223,7 +239,7 @@ void AEnemyAIController::Tick(float _deltaTime)
 				//警戒中は記憶位置の左右をゆっくり見渡し、現在のプレイヤー位置を盗み見ない
 				const float scan = m_cautious ? FMath::Sin(GetWorld()->GetTimeSeconds() * 0.8f) * 40.f : 0.f;
 				const FRotator desired(0.f, look.Rotation().Yaw + scan, 0.f);
-				m_enemy->SetActorRotation(FMath::RInterpConstantTo(m_enemy->GetActorRotation(), desired, _deltaTime, m_cautious ? 60.f : 180.f));
+				m_enemy->SetActorRotation(FMath::RInterpConstantTo(m_enemy->GetActorRotation(), desired, _deltaTime, m_cautious ? 90.f : 360.f));
 			}
 		}
 		TickBehaviorTreeSafety(_deltaTime);
@@ -305,8 +321,9 @@ void AEnemyAIController::TickBehaviorTreeSafety(float _deltaTime)
 	if (!IsValid(m_targetActor)) { return; }
 
 	m_btPerceptionRefreshTime += _deltaTime;
-	//知覚の取りこぼしを防ぐため0.2秒間隔で視認状態を再確認する
-	if (m_btPerceptionRefreshTime >= 0.2f)
+	//ボスは雑魚より短い間隔で再確認し、移動中に正面を横切る相手も捉える
+	const float sightInterval = m_enemy->m_enemyRank == EEnemyRank::Minion ? 0.15f : 0.1f;
+	if (m_btPerceptionRefreshTime >= sightInterval)
 	{
 		m_btPerceptionRefreshTime = 0.f;
 		//知覚コンポーネントへ現在の刺激を再取得させる

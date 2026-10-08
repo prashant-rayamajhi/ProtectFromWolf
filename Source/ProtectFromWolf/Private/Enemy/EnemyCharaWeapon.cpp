@@ -40,12 +40,11 @@ void AEnemyChara::SwitchWeapon(EEnemyAttackStyle _newStyle)
 		SetActionState(EActionState::Idle);
 	}
 
-	//レーザーStyleは手持ち武器を表示せず即座に準備完了へ移行する
+	//レーザーへの武器切替でも、持っている武器を突然消さず収納手順を通す
 	if (_newStyle == EEnemyAttackStyle::Laser)
 	{
 		m_currentStyle = _newStyle;
-		SetWeaponVisibility(false);
-		m_weaponState = EWeaponState::Ready;
+		BeginLaserAttackSequence();
 		return;
 	}
 
@@ -164,7 +163,7 @@ void AEnemyChara::DrawWeapon()
 	//通知のないモンタージュも再生終了で準備完了にし、再生できない場合はその場で復帰する
 	UAnimMontage *montage = m_montageMap.FindRef(TEXT("DrawWeapon"));
 	UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
-	if (montage && animation && animation->Montage_Play(montage) > 0.f)
+	if (montage && animation && animation->Montage_Play(montage, 1.35f) > 0.f)
 	{
 		FOnMontageEnded ended;
 		ended.BindWeakLambda(this, [this](UAnimMontage *_finished, bool _interrupted)
@@ -186,13 +185,32 @@ void AEnemyChara::HolsterWeapon()
 	//武器操作音が設定されている場合は収納開始地点で再生する
 	if (m_weaponHandlingSound) { UGameplayStatics::PlaySoundAtLocation(this, m_weaponHandlingSound, GetActorLocation(), 0.4f, 0.82f); }
 
-	//収納モンタージュが登録されている場合はAnimation完了通知を待つ
-	if (m_montageMap.Contains(TEXT("HolsterWeapon")))
+	//通知の欠落や再生失敗でも収納待ちのまま固まらないよう終了を監視する
+	UAnimMontage *montage = m_montageMap.FindRef(TEXT("HolsterWeapon"));
+	//レーザーへ攻撃形式を変更済みでも、手元に表示されている武器の収納モーションを選ぶ
+	if (!montage)
 	{
-		//収納モンタージュを再生するAnimation Instance
-		UAnimInstance *animInst = GetMesh()->GetAnimInstance();
-		//Animation Instanceが有効な場合だけ収納モンタージュを再生する
-		if (animInst) { animInst->Montage_Play(m_montageMap[TEXT("HolsterWeapon")]); }
+		if (IsValid(m_currentGun) && !m_currentGun->IsHidden()) { montage = m_montageMap.FindRef(TEXT("HolsterGun")); }
+		else if (IsValid(m_meleeWeapon) && !m_meleeWeapon->IsHidden()) { montage = m_montageMap.FindRef(TEXT("HolsterMelee")); }
+	}
+	UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (montage && animation && animation->Montage_Play(montage) > 0.f)
+	{
+		FOnMontageEnded ended;
+		ended.BindWeakLambda(this, [this](UAnimMontage *_finished, bool _interrupted)
+		{
+			if (m_weaponState != EWeaponState::Holstering) { return; }
+			if (_interrupted || GetHealthRatio() <= 0.f)
+			{
+				m_laserAfterHolster = false;
+				m_isSwitchingWeapon = false;
+				m_weaponState = EWeaponState::Ready;
+				if (GetHealthRatio() > 0.f && m_actionState == EActionState::HolsteringWeapon) { SetActionState(EActionState::Idle); }
+				return;
+			}
+			OnWeaponHolsterComplete();
+		});
+		animation->Montage_SetEndDelegate(ended, montage);
 	}
 	else { OnWeaponHolsterComplete(); }
 }
@@ -257,12 +275,18 @@ void AEnemyChara::OnWeaponHolsterComplete()
 {
 	//古い攻撃モンタージュの収納通知で戦闘中の武器を隠さない
 	if (m_weaponState != EWeaponState::Holstering && !m_isSwitchingWeapon) { return; }
+	if (GetHealthRatio() <= 0.f) { m_laserAfterHolster = false; return; }
 	m_weaponState = EWeaponState::Holstered;
 	SetActionState(EActionState::Idle);
 	SetWeaponVisibility(false);
 
 	//武器切り替え中の場合は次の武器生成と構えへ進む
 	if (m_isSwitchingWeapon) { OnWeaponSwitchComplete(); }
+	else if (m_laserAfterHolster)
+	{
+		m_laserAfterHolster = false;
+		BeginLaserAttackSequence();
+	}
 }
 
 //武器表示状態を設定する関数

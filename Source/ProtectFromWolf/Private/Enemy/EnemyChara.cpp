@@ -169,6 +169,14 @@ void AEnemyChara::Tick(float _deltaTime)
 
 	//アクション状態がIdle以外の場合、経過時間を加算する
 	m_actionStateElapsed += _deltaTime;
+	//剣の射程外へ逃げた相手に振り続けず、近接モーションと命中判定を終了する
+	if (m_actionState == EActionState::Attacking && m_meleeStrikeActive &&
+		(!IsTargetWithinMeleeStrikeRange(UGameplayStatics::GetPlayerPawn(GetWorld(), 0)) ||
+		!GetMesh()->GetAnimInstance() || !GetMesh()->GetAnimInstance()->Montage_IsPlaying(m_attackMontage)))
+	{
+		OnAttackEnd();
+		return;
+	}
 	//正常に射撃姿勢を維持している連続バーストを停止故障と誤判定しない
 	if (m_actionState == EActionState::Attacking && m_currentStyle == EEnemyAttackStyle::Gun && m_currentGun &&
 		!m_currentGun->IsOutOfAmmo() && GetMesh()->GetAnimInstance() &&
@@ -197,6 +205,8 @@ void AEnemyChara::Tick(float _deltaTime)
 void AEnemyChara::RecoverFromStalledAction()
 {
 	//吹き飛びや死亡の後に、以前の瞬間移動と召喚を実行させない
+	m_laserAfterHolster = false;
+	m_meleeStrikeActive = false;
 	GetWorldTimerManager().ClearTimer(m_teleportTimerHandle);
 	GetWorldTimerManager().ClearTimer(m_teleportFinishTimer);
 	GetWorldTimerManager().ClearTimer(m_summonTimer);
@@ -299,6 +309,8 @@ void AEnemyChara::BeginPlay()
 	}
 	//前回の近接敵調整を維持したうえで、全ての敵の通常移動をさらに10％遅くする
 	m_defaultMoveSpeed *= CharacterPace::WalkScale;
+	//ボスだけ通常移動を二割速め、解除や退避後にも同じ基準速度へ戻す
+	if (m_enemyRank != EEnemyRank::Minion) { m_defaultMoveSpeed *= 1.2f; }
 	GetCharacterMovement()->MaxWalkSpeed = m_defaultMoveSpeed;
 
 	//古いデータ値に左右されないよう敵ランクからプレイヤーへのダメージを決定する処理

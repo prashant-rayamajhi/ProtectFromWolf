@@ -59,6 +59,8 @@ void AEnemyChara::PerformAttack()
 	if (m_actionState == EActionState::Attacking || m_actionState == EActionState::Reloading) { return; }
 
 	if (m_isSwitchingWeapon) { return; }
+	//通常攻撃から選ばれたレーザーも収納と溜めの順番を省略しない
+	if (m_currentStyle == EEnemyAttackStyle::Laser) { BeginLaserAttackSequence(); return; }
 
 	if (m_weaponState != EWeaponState::Ready) { return; }
 
@@ -84,7 +86,7 @@ void AEnemyChara::PerformAttack()
 		GunAttack();
 		break;
 	case EEnemyAttackStyle::Laser:
-		LaserAttack();
+		//レーザーは上の専用経路で開始する
 		break;
 	}
 }
@@ -147,31 +149,33 @@ void AEnemyChara::PlayAttackMontage()
 	if (!animInst->Montage_IsPlaying(m_attackMontage))
 	{
 		m_currentAttackIndex = 0;
-		float duration = animInst->Montage_Play(m_attackMontage);
+		const float duration = animInst->Montage_Play(m_attackMontage);
+		if (duration <= 0.f) { SetActionState(EActionState::Idle); return; }
+		//アセット側の連結設定で同じ振りが続かないよう、一回の判断では一セクションだけ再生する
+		for (int32 section = 0; section < m_attackMontage->CompositeSections.Num(); ++section)
+		{
+			animInst->Montage_SetNextSection(m_attackMontage->GetSectionName(section), NAME_None, m_attackMontage);
+		}
 
 		//攻撃モンタージュの最初のセクションにジャンプする
 		if (m_attackMontage->IsValidSectionName(TEXT("Attack1"))) { animInst->Montage_JumpToSection(TEXT("Attack1"), m_attackMontage); }
 
-		//攻撃モンタージュの再生時間が1秒以上の場合は、攻撃モンタージュの再生終了後にデフォルト速度に戻すタイマーを設定する
-		FTimerHandle timerHandle;
-		TWeakObjectPtr<AEnemyChara> weakThis(this);
-		GetWorld()->GetTimerManager().SetTimer(
-			timerHandle,
-			[weakThis]()
-			{
-				if (weakThis.IsValid() && weakThis->m_actionState == EActionState::Attacking)
-				{
-					weakThis->RestoreDefaultSpeed();
-					weakThis->SetActionState(EActionState::Idle);
-				}
-			},
-			FMath::Max(duration, 1.0f), false);
+		//古い終了タイマーが次の攻撃を解除しないよう、再生中の近接モーションの終了を受け取る
+		FOnMontageEnded ended;
+		ended.BindWeakLambda(this, [this](UAnimMontage *_finished, bool _interrupted)
+		{
+			if (_finished == m_attackMontage && m_currentStyle == EEnemyAttackStyle::Melee) { OnAttackEnd(); }
+		});
+		animInst->Montage_SetEndDelegate(ended, m_attackMontage);
 	}
 }
 
 //近接攻撃 攻撃に対応するクラス状態を更新する関数
 void AEnemyChara::MeleeAttack()
 {
+	//剣を振る間に経路移動の残速度で相手へめり込まないよう停止する
+	if (AAIController *controller = Cast<AAIController>(GetController())) { controller->StopMovement(); }
+	if (GetCharacterMovement()) { GetCharacterMovement()->StopMovementImmediately(); }
 	//近接攻撃モンタージュを取得する
 	UAnimMontage *meleeMontage = nullptr;
 
@@ -180,16 +184,28 @@ void AEnemyChara::MeleeAttack()
 	//近接攻撃モンタージュが存在する場合は、近接攻撃モンタージュを再生する
 	if (meleeMontage)
 	{
+		//一振りの長さに対して一秒の終了ブレンドが長すぎるため、敵専用の複製で短くする
+		if (meleeMontage->GetOuter() != this)
+		{
+			meleeMontage = DuplicateObject<UAnimMontage>(meleeMontage, this);
+			meleeMontage->BlendOut.SetBlendTime(0.15f);
+			meleeMontage->BlendOutTriggerTime = -1.f;
+			m_montageMap.Add(TEXT("Melee"), meleeMontage);
+		}
 		//振りかぶり開始では鳴らさず、実際に剣を振る受付区間まで待つ
 		m_meleeSwingPlayed = false;
 
 		//近接攻撃モンタージュを再生する
 		m_attackMontage = meleeMontage;
+		m_meleeStrikeActive = true;
 		PlayAttackMontage();
+		if (m_actionState != EActionState::Attacking) { m_meleeStrikeActive = false; return; }
 
 		//近接攻撃 命中 受付時間を開始する
 		CloseMeleeHitWindow();
-		const float montageDuration = FMath::Max(meleeMontage->GetPlayLength(), 0.2f);
+		//連続攻撃全体ではなく、今回再生する一振りに命中タイマーを合わせる
+		const int32 section = meleeMontage->GetSectionIndex(TEXT("Attack1"));
+		const float montageDuration = FMath::Max(section != INDEX_NONE ? meleeMontage->GetSectionLength(section) : meleeMontage->GetPlayLength(), 0.2f);
 		GetWorldTimerManager().SetTimer(m_meleeHitWindowOpenTimerHandle, this, &AEnemyChara::OpenMeleeHitWindow,
 										montageDuration * m_meleeHitWindowStartRatio, false);
 		GetWorldTimerManager().SetTimer(m_meleeHitWindowCloseTimerHandle, this, &AEnemyChara::CloseMeleeHitWindow,
@@ -246,7 +262,8 @@ void AEnemyChara::GunAttack()
 	{
 		m_attackMontage = gunMontage;
 		UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
-		if (!animation || animation->Montage_Play(gunMontage) <= 0.f)
+		//構え上げだけ速め、発射開始後は通常の再生速度へ戻す
+		if (!animation || animation->Montage_Play(gunMontage, 1.35f) <= 0.f)
 		{
 			SetActionState(EActionState::Idle);
 			return;
@@ -725,30 +742,11 @@ void AEnemyChara::OnAttackEnd()
 {
 	//死亡後や別の攻撃中に届いた通知から近接コンボを再開しない
 	if (GetHealthRatio() <= 0.f || m_actionState != EActionState::Attacking) { return; }
+	m_meleeStrikeActive = false;
 	//近接攻撃 命中 受付時間を終了する
 	CloseMeleeHitWindow();
-	UAnimInstance *animInst = GetMesh()->GetAnimInstance();
-
-	//攻撃モンタージュが再生中でない場合は、攻撃モンタージュを再生する
-	if (!animInst) { return; }
-
-	//リロードの弾薬状態に合わせて射撃または補充処理へ分岐する
-	if (m_actionState == EActionState::Reloading) { return; }
-
-	//攻撃モンタージュが再生中でない場合は、攻撃モンタージュを再生する
-	if (m_attackHit && m_attackMontage && CanCommitMeleeAttack(UGameplayStatics::GetPlayerPawn(GetWorld(), 0)))
-	{
-		m_currentAttackIndex++;
-		FName nextSection = FName(*FString::Printf(TEXT("Attack%d"), m_currentAttackIndex + 1));
-
-		//攻撃モンタージュの次のセクションが有効な場合は、攻撃モンタージュの次のセクションにジャンプする
-		if (m_attackMontage->IsValidSectionName(nextSection))
-		{
-			m_attackHit = false;
-			animInst->Montage_JumpToSection(nextSection, m_attackMontage);
-			return;
-		}
-	}
+	GetWorldTimerManager().ClearTimer(m_meleeHitWindowCloseTimerHandle);
+	UAnimInstance *animInst = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
 
 	//攻撃モンタージュの次のセクションが有効でない場合は、攻撃モンタージュを停止する
 	m_attackHit = false;
@@ -759,6 +757,8 @@ void AEnemyChara::OnAttackEnd()
 
 	//攻撃モンタージュを停止する
 	SetActionState(EActionState::Idle);
+	//状態を解除してから停止し、終了コールバックによる二重終了を防ぐ
+	if (animInst && m_attackMontage == m_montageMap.FindRef(TEXT("Melee"))) { animInst->Montage_Stop(0.15f, m_attackMontage); }
 }
 
 //通知区間外のタイマー発射と、構え上げ途中の発射を防ぐ関数
@@ -796,7 +796,11 @@ void AEnemyChara::BeginFireSequence()
 		if (m_attackMontage && m_attackMontage->IsValidSectionName(TEXT("Fire")) &&
 			(!animation || !animation->Montage_IsPlaying(m_attackMontage) ||
 			animation->Montage_GetCurrentSection(m_attackMontage) != TEXT("Fire"))) { return; }
-		if (IsValid(m_currentGun) && IsInGunFireWindow()) { m_currentGun->StartFire(); }
+		if (IsValid(m_currentGun) && IsInGunFireWindow())
+		{
+			if (animation && m_attackMontage) { animation->Montage_SetPlayRate(m_attackMontage, 1.f); }
+			m_currentGun->StartFire();
+		}
 	}
 }
 

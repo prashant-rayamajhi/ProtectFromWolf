@@ -387,7 +387,8 @@ bool UEnemyDecisionComponent::CommitBossAction(FName _actionName)
 	}
 
 	//武器の準備不足などで開始できなかった行動には待機時間を発生させない
-	if (!m_enemy->IsAttacking() && !m_enemy->IsTeleporting()) { return false; }
+	//レーザーの収納待ちも開始済みとして記録し、選択し直しや連続使用を防ぐ
+	if (!m_enemy->IsAttacking() && !m_enemy->IsTeleporting() && !m_enemy->IsLaserSequenceActive()) { return false; }
 
 	//ボス攻撃を戦闘記憶へ記録する
 	if (m_enemy->m_combatMemoryComponent) { m_enemy->m_combatMemoryComponent->SetActionCommitted(_actionName); }

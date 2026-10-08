@@ -127,7 +127,15 @@ bool FEnemyTeamTactics::FindFirePosition(AEnemyChara *_enemy, AActor *_target, F
 		for (TActorIterator<AEnemyChara> peer(_enemy->GetWorld()); peer; ++peer)
 		{
 			if (*peer == _enemy || peer->IsHidden() || peer->GetHealthRatio() <= 0.f || !SharesRoom(_enemy, *peer)) { continue; }
-			const FVector peerDirection = (peer->GetActorLocation() - targetPosition).GetSafeNormal2D();
+			//味方の現在地だけでなく移動先も比較し、別々に選んだ射撃地点が同じ方向へ集まるのを避ける
+			FVector peerPosition = peer->GetActorLocation();
+			const AAIController *peerController = Cast<AAIController>(peer->GetController());
+			if (peerController && peerController->GetMoveStatus() == EPathFollowingStatus::Moving && peerController->GetPathFollowingComponent())
+			{
+				const FNavPathSharedPtr peerPath = peerController->GetPathFollowingComponent()->GetPath();
+				if (peerPath.IsValid() && !peerPath->GetPathPoints().IsEmpty()) { peerPosition = peerPath->GetPathPoints().Last().Location; }
+			}
+			const FVector peerDirection = (peerPosition - targetPosition).GetSafeNormal2D();
 			separation = FMath::Min(separation, FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FVector::DotProduct(direction, peerDirection), -1.f, 1.f))));
 		}
 		const float score = separation * 8.f - path->GetPathLength() * 0.35f;

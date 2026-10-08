@@ -481,8 +481,15 @@ void AEnemyChara::PerformTeleportAwayFromTarget()
 //LaserChargeを開始する関数
 void AEnemyChara::StartLaserCharge()
 {
-	//ターゲットをプレイヤーのポーンに設定し、存在する場合はターゲットの方向を向く
-	FaceTarget(UGameplayStatics::GetPlayerPawn(GetWorld(), 0));
+	//収納中に遮蔽物へ隠れた相手は追尾せず、最後に確認した位置へ溜めを向ける
+	AActor *target = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
+	const AEnemyAIController *controller = Cast<AEnemyAIController>(GetController());
+	if (controller && controller->CanObserveTarget(target)) { FaceTarget(target); }
+	else if (controller && controller->HasCombatAwareness())
+	{
+		const FVector direction = controller->GetLastKnownPlayerLocation() - GetActorLocation();
+		if (!direction.IsNearlyZero()) { SetActorRotation(FRotator(0.f, direction.Rotation().Yaw, 0.f)); }
+	}
 
 	//レーザー攻撃 Chargeのサウンドが有効な場合、指定位置で再生する（音量とピッチを指定する）
 	if (m_bossLaserSound) { UGameplayStatics::PlaySoundAtLocation(this, m_bossLaserSound, GetActorLocation(), 0.58f, 0.68f); }
@@ -533,7 +540,7 @@ void AEnemyChara::StartLaserCharge()
 //Laser攻撃Sequenceを開始する関数
 bool AEnemyChara::IsLaserSequenceActive() const
 {
-	return GetWorld() && (GetWorld()->GetTimerManager().IsTimerActive(m_laserAttackTimerHandle) ||
+	return GetWorld() && (m_laserAfterHolster || GetWorld()->GetTimerManager().IsTimerActive(m_laserAttackTimerHandle) ||
 		GetWorld()->GetTimerManager().IsTimerActive(m_laserStateResetTimerHandle));
 }
 
@@ -542,6 +549,20 @@ void AEnemyChara::BeginLaserAttackSequence()
 {
 	//レーザー攻撃がすでに実行中の場合や、ワールドが存在しない場合は処理を中止する
 	if (m_actionState != EActionState::Idle || !GetWorld()) { return; }
+	if (m_isSwitchingWeapon || m_isReloading || IsKnockedBack()) { return; }
+	if (GetHealthRatio() <= 0.f) { m_laserAfterHolster = false; return; }
+	//銃や近接武器を持ったまま溜め姿勢に入らず、収納通知から続行する
+	if (m_weaponState == EWeaponState::Ready)
+	{
+		m_laserAfterHolster = true;
+		StopFiring();
+		if (AAIController *controller = Cast<AAIController>(GetController())) { controller->StopMovement(); }
+		HolsterWeapon();
+		return;
+	}
+	if (m_weaponState != EWeaponState::Holstered) { return; }
+	m_laserAfterHolster = false;
+	SetWeaponVisibility(false);
 
 	//アクション状態を Attacking に設定する
 	SetActionState(EActionState::Attacking);

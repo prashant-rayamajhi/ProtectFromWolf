@@ -375,8 +375,9 @@ EBTNodeResult::Type UBTTask_EnemyAttack::ExecuteTask(UBehaviorTreeComponent &_ow
 	//向き直った後も距離や相手の移動予測が合わない場合は接近を続ける
 	if (enemy->m_currentStyle == EEnemyAttackStyle::Melee && !enemy->CanCommitMeleeAttack(targetActor))
 	{
-		controller->MoveToActor(targetActor, enemy->GetMeleeStrikeRange(targetActor) * 0.5f, false, true, true, nullptr,
-								true);
+		//相手の半径を除いた移動完了距離で、剣の間合いまで接近する
+		const float stopRange = FMath::Max(5.f, enemy->GetMeleeStrikeRange(targetActor) * 0.9f - targetActor->GetSimpleCollisionRadius());
+		controller->MoveToActor(targetActor, stopRange, false, true, true, nullptr, true);
 		return EBTNodeResult::Succeeded;
 	}
 	//遠距離攻撃スタイルの敵で、遠距離攻撃を実行できない場合、遠距離フォーメーション位置を検索し、移動を指示する
@@ -504,7 +505,9 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 		if (CanClaimMeleeAttackSlot(enemy) && enemy->CanReachMeleeHeight(targetActor) &&
 			FVector::DistSquared2D(enemy->GetActorLocation(), formationPosition) <= FMath::Square(65.f))
 		{
-			controller->MoveToActor(targetActor, enemy->GetMeleeStrikeRange(targetActor) * 0.5f, false, true, true, nullptr, true);
+			//MoveToActorが加算する相手の半径を除き、中心間距離を剣の射程の九割に合わせる
+			const float stopRange = FMath::Max(5.f, enemy->GetMeleeStrikeRange(targetActor) * 0.9f - targetActor->GetSimpleCollisionRadius());
+			controller->MoveToActor(targetActor, stopRange, false, true, true, nullptr, true);
 			return EBTNodeResult::Succeeded;
 		}
 		//カプセル半径で早く到着扱いにせず、次の接近判定に入れる位置まで進む
@@ -527,8 +530,12 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 	}
 
 	//AIコントローラーにターゲットアクターに移動するよう指示する
-	const float approachRange = enemy->GetEffectiveAttackRange(targetActor) * TargetAcceptanceRadiusMultiplier;
-	controller->MoveToActor(targetActor, approachRange, false, true, true, nullptr, true);
+	const float approachRange = enemy->GetEffectiveAttackRange(targetActor) *
+		(enemy->m_currentStyle == EEnemyAttackStyle::Melee ? 0.9f : TargetAcceptanceRadiusMultiplier);
+	//近接距離に含まれる相手の半径を移動完了判定で二重に加算しない
+	const float stopRange = enemy->m_currentStyle == EEnemyAttackStyle::Melee ?
+		FMath::Max(5.f, approachRange - targetActor->GetSimpleCollisionRadius()) : approachRange;
+	controller->MoveToActor(targetActor, stopRange, false, true, true, nullptr, true);
 	return EBTNodeResult::Succeeded;
 }
 

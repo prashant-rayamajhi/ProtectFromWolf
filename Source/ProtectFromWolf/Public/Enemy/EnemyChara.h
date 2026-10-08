@@ -165,6 +165,8 @@ class PROTECTFROMWOLF_API AEnemyChara : public ACharacter
 	}
 	//対象のCollision幅を含めた近接攻撃の命中可能距離を返す関数
 	float GetMeleeStrikeRange(const AActor *_target) const;
+	//剣の攻撃だけを中断し、レーザーや跳躍の攻撃状態と区別するためのフラグ
+	bool m_meleeStrikeActive = false;
 	//攻撃対象 Within 近接攻撃 Strike 範囲が現在成立しているかを判定する関数
 	bool IsTargetWithinMeleeStrikeRange(const AActor *_target) const;
 	//高い足場やジャンプ中の相手へ近接武器が届く高さか確認する関数
@@ -274,6 +276,9 @@ class PROTECTFROMWOLF_API AEnemyChara : public ACharacter
 	void BeginLaserAttackSequence();
 	//溜めまたは照射の途中に通常射撃の移動判断を割り込ませないための判定関数
 	bool IsLaserSequenceActive() const;
+
+	//レーザー開始前に武器の収納完了を待っている状態
+	bool m_laserAfterHolster = false;
 
   public:
 	//現在の攻撃形式に対応する攻撃モンタージュを再生する関数
