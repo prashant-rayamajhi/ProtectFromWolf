@@ -159,6 +159,11 @@ class PROTECTFROMWOLF_API AEnemyChara : public ACharacter
 	{
 		return m_enemyRank == EEnemyRank::Minion ? 3.f : 5.f;
 	}
+	//ボスの射撃とレーザーに共通する再生速度と攻撃頻度の倍率を返す関数
+	float GetRangedAttackRate() const
+	{
+		return m_enemyRank == EEnemyRank::Minion ? 1.f : 1.2f;
+	}
 	float GetProjectileAttackDamage() const
 	{
 		return m_enemyRank == EEnemyRank::Minion ? 1.f : 5.f;

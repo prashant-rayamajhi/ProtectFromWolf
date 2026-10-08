@@ -263,8 +263,8 @@ void AEnemyChara::GunAttack()
 		m_attackMontage = gunMontage;
 		UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
 		//構え上げだけ速め、発射開始後は通常の再生速度へ戻す
-		//射撃雑魚の照準完了までを従来より20％速め、発射通知も同じ再生位置に同期させる
-		const float aimRate = m_enemyRank == EEnemyRank::Minion ? 1.35f * 1.2f : 1.35f;
+		//雑魚の調整済み速度を維持し、ボスの照準完了までも従来より20％速める
+		const float aimRate = 1.35f * 1.2f;
 		if (!animation || animation->Montage_Play(gunMontage, aimRate) <= 0.f)
 		{
 			SetActionState(EActionState::Idle);
@@ -305,7 +305,7 @@ void AEnemyChara::LaserAttack()
 	{
 		UAnimInstance *animInst = GetMesh()->GetAnimInstance();
 
-		if (animInst) { animInst->Montage_Play(m_montageMap[TEXT("Laser")]); }
+		if (animInst) { animInst->Montage_Play(m_montageMap[TEXT("Laser")], GetRangedAttackRate()); }
 	}
 
 	//レーザー攻撃の対象を取得する
@@ -392,7 +392,7 @@ void AEnemyChara::LaserAttack()
 
 	//レーザー攻撃の方向を回転に変換する
 	const FRotator laserRotation = direction.Rotation();
-	world->GetTimerManager().SetTimer(m_laserStateResetTimerHandle, this, &AEnemyChara::FinishLaserAttack, m_laserEffectDuration, false);
+	world->GetTimerManager().SetTimer(m_laserStateResetTimerHandle, this, &AEnemyChara::FinishLaserAttack, m_laserEffectDuration / GetRangedAttackRate(), false);
 
 	//レーザー攻撃のエフェクトを生成する
 	if (m_laserEffect)
@@ -409,7 +409,7 @@ void AEnemyChara::LaserAttack()
 			m_activeLaserBeam->Activate(true);
 
 			//レーザー攻撃のエフェクトのクリーンアップタイマーを設定する
-			world->GetTimerManager().SetTimer(m_laserEffectCleanupTimerHandle, this, &AEnemyChara::CleanupLaserEffect, m_laserEffectDuration, false);
+			world->GetTimerManager().SetTimer(m_laserEffectCleanupTimerHandle, this, &AEnemyChara::CleanupLaserEffect, m_laserEffectDuration / GetRangedAttackRate(), false);
 		}
 	}
 }
@@ -800,7 +800,7 @@ void AEnemyChara::BeginFireSequence()
 			animation->Montage_GetCurrentSection(m_attackMontage) != TEXT("Fire"))) { return; }
 		if (IsValid(m_currentGun) && IsInGunFireWindow())
 		{
-			if (animation && m_attackMontage) { animation->Montage_SetPlayRate(m_attackMontage, 1.f); }
+			if (animation && m_attackMontage) { animation->Montage_SetPlayRate(m_attackMontage, GetRangedAttackRate()); }
 			m_currentGun->StartFire();
 		}
 	}

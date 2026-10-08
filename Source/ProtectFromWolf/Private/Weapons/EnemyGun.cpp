@@ -108,7 +108,10 @@ void AEnemyGun::StartFire()
 		if (const AEnemyChara *ownerEnemy = Cast<AEnemyChara>(GetOwner()); !ownerEnemy || !ownerEnemy->IsAttacking()) { return; }
 
 		//安全にタイマーを登録するためワールドの存在を確認する
-		if (UWorld *world = GetWorld()) { world->GetTimerManager().SetTimer(m_autoFireTimer, this, &AEnemyGun::FireShot, m_fireRate, true); }
+		//所有者の攻撃速度に合わせた発射間隔。元の設定値は保持して倍率の累積を防ぐ
+		const AEnemyChara *shooter = Cast<AEnemyChara>(GetOwner());
+		const float shotDelay = m_fireRate / (shooter ? shooter->GetRangedAttackRate() : 1.f);
+		if (UWorld *world = GetWorld()) { world->GetTimerManager().SetTimer(m_autoFireTimer, this, &AEnemyGun::FireShot, shotDelay, true); }
 	}
 	else { StopFire(); }
 }
@@ -313,7 +316,9 @@ void AEnemyGun::FireShot()
 		//Worldが有効な場合は次のBurstを許可するTimerを設定する
 		if (UWorld *world = GetWorld())
 		{
-			world->GetTimerManager().SetTimer(m_burstCooldownTimer, this, &AEnemyGun::ResetFire, m_burstCooldown, false);
+			//ボスはバースト間の待ち時間も同じ倍率で短縮する
+			const float burstDelay = m_burstCooldown / ownerEnemy->GetRangedAttackRate();
+			world->GetTimerManager().SetTimer(m_burstCooldownTimer, this, &AEnemyGun::ResetFire, burstDelay, false);
 		}
 		//射撃間隔だけを空け、銃を構えるアニメーションと戦闘状態は維持する
 		StopFire();

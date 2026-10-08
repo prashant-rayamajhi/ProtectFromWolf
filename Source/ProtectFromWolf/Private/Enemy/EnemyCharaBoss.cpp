@@ -497,7 +497,7 @@ void AEnemyChara::StartLaserCharge()
 	//レーザー攻撃 Chargeのアニメーションを再生する（存在する場合）
 	if (UAnimInstance *animInstance = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr; animInstance && m_laserChargeAnimation)
 	{
-		animInstance->PlaySlotAnimationAsDynamicMontage(m_laserChargeAnimation, TEXT("DefaultSlot"), 0.12f, 0.12f, 1.f, 1, -1.f, 0.f);
+		animInstance->PlaySlotAnimationAsDynamicMontage(m_laserChargeAnimation, TEXT("DefaultSlot"), 0.12f, 0.12f, GetRangedAttackRate(), 1, -1.f, 0.f);
 	}
 	//レーザー攻撃 Chargeのモンタージュが有効な場合、モンタージュを再生する
 	else if (m_montageMap.Contains(TEXT("LaserCharge")))
@@ -505,7 +505,7 @@ void AEnemyChara::StartLaserCharge()
 		//レーザー溜めモンタージュを再生するAnimation Instance
 		UAnimInstance *animInst = GetMesh()->GetAnimInstance();
 		//Animation Instanceが有効な場合だけモンタージュを再生する
-		if (animInst) { animInst->Montage_Play(m_montageMap[TEXT("LaserCharge")]); }
+		if (animInst) { animInst->Montage_Play(m_montageMap[TEXT("LaserCharge")], GetRangedAttackRate()); }
 	}
 
 	//自動再生せずに生成し、読み込み待ちの再生要求を待機中へ持ち越さない
@@ -581,14 +581,16 @@ void AEnemyChara::BeginLaserAttackSequence()
 		m_laserEffectDuration = secondsPerFrame * 45.f;
 	}
 
-	//プレイヤーキャラクターを取得し、存在する場合はレーザー攻撃のためのパーフェクトドッジをスケジュールする
+	//元の設定値を変更せず、再生速度に合わせた発射までの秒数を算出する
+	const float chargeTime = m_laserChargeDuration / GetRangedAttackRate();
+	//高速化後の発射時刻を使い、ジャスト回避の合図も同じだけ早める
 	if (APlayerChara *player = Cast<APlayerChara>(UGameplayStatics::GetPlayerPawn(GetWorld(), 0)))
 	{
-		player->SchedulePerfectDodgeForLaser(this, m_laserChargeDuration);
+		player->SchedulePerfectDodgeForLaser(this, chargeTime);
 	}
 
 	//レーザー攻撃 Chargeの持続時間後に ExecuteChargedLaserAttack を呼び出すタイマーを設定する
-	GetWorldTimerManager().SetTimer(m_laserAttackTimerHandle, this, &AEnemyChara::ExecuteChargedLaserAttack, m_laserChargeDuration, false);
+	GetWorldTimerManager().SetTimer(m_laserAttackTimerHandle, this, &AEnemyChara::ExecuteChargedLaserAttack, chargeTime, false);
 }
 
 //Charged レーザー攻撃を現在の攻撃対象へ実行する関数
