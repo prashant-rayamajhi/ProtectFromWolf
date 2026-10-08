@@ -263,7 +263,9 @@ void AEnemyChara::GunAttack()
 		m_attackMontage = gunMontage;
 		UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
 		//構え上げだけ速め、発射開始後は通常の再生速度へ戻す
-		if (!animation || animation->Montage_Play(gunMontage, 1.35f) <= 0.f)
+		//射撃雑魚の照準完了までを従来より20％速め、発射通知も同じ再生位置に同期させる
+		const float aimRate = m_enemyRank == EEnemyRank::Minion ? 1.35f * 1.2f : 1.35f;
+		if (!animation || animation->Montage_Play(gunMontage, aimRate) <= 0.f)
 		{
 			SetActionState(EActionState::Idle);
 			return;

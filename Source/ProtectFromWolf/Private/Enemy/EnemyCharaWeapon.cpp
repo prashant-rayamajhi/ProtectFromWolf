@@ -163,7 +163,9 @@ void AEnemyChara::DrawWeapon()
 	//通知のないモンタージュも再生終了で準備完了にし、再生できない場合はその場で復帰する
 	UAnimMontage *montage = m_montageMap.FindRef(TEXT("DrawWeapon"));
 	UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
-	if (montage && animation && animation->Montage_Play(montage, 1.35f) > 0.f)
+	//射撃雑魚の銃を構える動作だけ従来より20％速め、近接武器とボスの速度は維持する
+	const float aimRate = m_enemyRank == EEnemyRank::Minion && m_currentStyle == EEnemyAttackStyle::Gun ? 1.35f * 1.2f : 1.35f;
+	if (montage && animation && animation->Montage_Play(montage, aimRate) > 0.f)
 	{
 		FOnMontageEnded ended;
 		ended.BindWeakLambda(this, [this](UAnimMontage *_finished, bool _interrupted)
