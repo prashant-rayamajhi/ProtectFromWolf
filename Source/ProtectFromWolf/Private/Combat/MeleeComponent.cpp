@@ -53,7 +53,10 @@ void UMeleeComponent::MeleeAttack()
 		float dot = FVector::DotProduct(forwardDir, dirToTarget);
 
 		//ターゲットが所有者の前方にいる場合、ダメージを適用する
-		if (dot >= 0.0f) { UGameplayStatics::ApplyDamage(target, actualDamage, pEnemy->GetController(), pEnemy, UDamageType::StaticClass()); }
+		if (dot >= 0.0f && UGameplayStatics::ApplyDamage(target, actualDamage, pEnemy->GetController(), pEnemy, UDamageType::StaticClass()) > 0.f)
+		{
+			pEnemy->ConfirmMeleeHit();
+		}
 	}
 }
 

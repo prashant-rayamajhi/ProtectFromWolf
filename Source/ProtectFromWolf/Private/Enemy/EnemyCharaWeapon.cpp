@@ -5,6 +5,7 @@
 #include "AI/Controllers/EnemyAIController.h"
 #include "Weapons/EnemyGun.h"
 #include "Animation/AnimMontage.h"
+#include "Animation/AnimSequence.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
 #include "Components/WidgetComponent.h"
@@ -30,6 +31,8 @@ void AEnemyChara::SwitchWeapon(EEnemyAttackStyle _newStyle)
 	if (m_currentStyle == _newStyle && m_weaponState == EWeaponState::Ready) { return; }
 	//別の武器切り替えAnimation中は新しい要求を受け付けない
 	if (m_isSwitchingWeapon) { return; }
+	//取り出しと収納の途中で次の武器要求を重ねない
+	if (m_weaponState == EWeaponState::Drawing || m_weaponState == EWeaponState::Holstering) { return; }
 	//銃を装備中の場合は武器切り替え前に射撃を停止する
 	if (IsValid(m_currentGun)) { m_currentGun->StopFire(); }
 
@@ -110,6 +113,8 @@ void AEnemyChara::CreateWeapon(EEnemyAttackStyle _weaponType)
 //武器切り替え完了の通知を受け取る関数
 void AEnemyChara::OnWeaponSwitchComplete()
 {
+	//既に近接だった場合は接近を繰り返さない
+	m_meleeAfterDraw = m_enemyRank != EEnemyRank::Minion && m_currentStyle != EEnemyAttackStyle::Melee && m_pendingWeaponStyle == EEnemyAttackStyle::Melee;
 	m_currentStyle = m_pendingWeaponStyle;
 	CreateWeapon(m_currentStyle);
 	DrawWeapon();
@@ -144,6 +149,8 @@ void AEnemyChara::EquipWeapon(EEnemyAttackStyle _newStyle)
 	}
 
 	m_weaponState = EWeaponState::Ready;
+	//表示だけを戻すと収納時に無効化した剣の衝突が残るため、装備状態と一緒に復帰させる
+	SetWeaponVisibility(!IsHidden());
 
 	//ボスRankは収納と構えAnimationを経由して武器を切り替える
 	if (m_enemyRank == EEnemyRank::MiddleBoss || m_enemyRank == EEnemyRank::LastBoss) { SwitchWeapon(_newStyle); }
@@ -157,20 +164,38 @@ void AEnemyChara::DrawWeapon()
 	if (m_weaponState != EWeaponState::Holstered) { return; }
 	m_weaponState = EWeaponState::Drawing;
 	SetActionState(EActionState::DrawingWeapon);
+	SetWeaponVisibility(false);
 	//武器操作音が設定されている場合は構え開始地点で再生する
 	if (m_weaponHandlingSound) { UGameplayStatics::PlaySoundAtLocation(this, m_weaponHandlingSound, GetActorLocation(), 0.46f, 1.15f); }
 
 	//通知のないモンタージュも再生終了で準備完了にし、再生できない場合はその場で復帰する
 	UAnimMontage *montage = m_montageMap.FindRef(TEXT("DrawWeapon"));
+	//武器別の構えモーションが登録されている場合も、取り出しを省略しない
+	if (!montage) { montage = m_montageMap.FindRef(m_currentStyle == EEnemyAttackStyle::Gun ? TEXT("DrawGun") : TEXT("DrawMelee")); }
 	UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
 	//銃を構える動作を20％速め、近接武器の構え速度は維持する
-	const float aimRate = m_currentStyle == EEnemyAttackStyle::Gun ? 1.35f * 1.2f : 1.35f;
+	const float aimRate = m_currentStyle == EEnemyAttackStyle::Gun ? 1.35f * 1.2f * 1.2f : 1.35f;
+	m_weaponMontage = montage;
+	//素材のフレームレートから四フレーム目を求め、再生速度を変えても表示する姿勢を揃える
+	m_weaponShowTime = 4.f / 30.f;
+	if (montage && !montage->SlotAnimTracks.IsEmpty() && !montage->SlotAnimTracks[0].AnimTrack.AnimSegments.IsEmpty())
+	{
+		const FAnimSegment &segment = montage->SlotAnimTracks[0].AnimTrack.AnimSegments[0];
+		if (const UAnimSequence *sequence = Cast<UAnimSequence>(segment.GetAnimReference()))
+		{
+			m_weaponShowTime = segment.StartPos + 4.f / FMath::Max(1.f, static_cast<float>(sequence->GetSamplingFrameRate().AsDecimal())) /
+				FMath::Max(0.01f, FMath::Abs(segment.AnimPlayRate));
+		}
+	}
 	if (montage && animation && animation->Montage_Play(montage, aimRate) > 0.f)
 	{
 		FOnMontageEnded ended;
 		ended.BindWeakLambda(this, [this](UAnimMontage *_finished, bool _interrupted)
 		{
-			if (!_interrupted && GetHealthRatio() > 0.f && m_weaponState == EWeaponState::Drawing) { OnWeaponDrawComplete(); }
+			if (_finished != m_weaponMontage || m_weaponState != EWeaponState::Drawing) { return; }
+			//中断時も装備状態を確定し、再生されていない取り出しを待ち続けない
+			if (_interrupted) { m_meleeAfterDraw = false; }
+			if (GetHealthRatio() > 0.f) { OnWeaponDrawComplete(); }
 		});
 		animation->Montage_SetEndDelegate(ended, montage);
 	}
@@ -196,17 +221,24 @@ void AEnemyChara::HolsterWeapon()
 		else if (IsValid(m_meleeWeapon) && !m_meleeWeapon->IsHidden()) { montage = m_montageMap.FindRef(TEXT("HolsterMelee")); }
 	}
 	UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	m_weaponMontage = montage;
+	//手が背中へ回る収納姿勢で銃を隠し、腕が下がり切るまで手元へ残さない処理
+	const bool holsteringGun = IsValid(m_currentGun) && !m_currentGun->IsHidden();
+	m_weaponHideTime = montage ? montage->GetPlayLength() * (holsteringGun ? FMath::Clamp(m_gunHideRatio, 0.f, 1.f) : 0.9f) : 0.f;
 	if (montage && animation && animation->Montage_Play(montage) > 0.f)
 	{
 		FOnMontageEnded ended;
 		ended.BindWeakLambda(this, [this](UAnimMontage *_finished, bool _interrupted)
 		{
-			if (m_weaponState != EWeaponState::Holstering) { return; }
+			if (_finished != m_weaponMontage || m_weaponState != EWeaponState::Holstering) { return; }
 			if (_interrupted || GetHealthRatio() <= 0.f)
 			{
 				m_laserAfterHolster = false;
+				m_smashAfterHolster = false;
 				m_isSwitchingWeapon = false;
 				m_weaponState = EWeaponState::Ready;
+				m_weaponMontage = nullptr;
+				if (GetHealthRatio() > 0.f && !IsHidden()) { SetWeaponVisibility(true); }
 				if (GetHealthRatio() > 0.f && m_actionState == EActionState::HolsteringWeapon) { SetActionState(EActionState::Idle); }
 				return;
 			}
@@ -230,6 +262,8 @@ void AEnemyChara::StopFiring()
 {
 	//銃が有効な場合はBurst Timerを含む射撃を停止する
 	if (IsValid(m_currentGun)) { m_currentGun->StopFire(); }
+	//銃を持ったまま召喚している場合も、射撃停止から召喚状態を解除しない
+	if (IsSummoning()) { return; }
 
 	//攻撃状態の場合は射撃モンタージュも停止してIdleへ戻す
 	if (m_actionState == EActionState::Attacking)
@@ -257,12 +291,20 @@ void AEnemyChara::LowerWeapon()
 //武器構え完了の通知を受け取る関数
 void AEnemyChara::OnWeaponDrawComplete()
 {
+	//射撃や以前の取り出しの通知で、収納中の状態を書き換えない
+	if (m_weaponState != EWeaponState::Drawing) { return; }
 	m_weaponState = EWeaponState::Ready;
+	m_weaponMontage = nullptr;
 	//射撃セクションにある構え完了通知で進行中の射撃を解除しない
 	if (m_actionState == EActionState::DrawingWeapon) { SetActionState(EActionState::Idle); }
 
 	//敵本体が表示中の場合だけ装備中の武器を表示する
 	if (!IsHidden()) { SetWeaponVisibility(true); }
+	if (m_meleeAfterDraw && GetHealthRatio() > 0.f)
+	{
+		m_meleeAfterDraw = false;
+		PerformTeleportToTarget();
+	}
 }
 
 //構えAnimation完了後に射撃可能状態へ移行する関数
@@ -277,18 +319,55 @@ void AEnemyChara::OnWeaponHolsterComplete()
 {
 	//古い攻撃モンタージュの収納通知で戦闘中の武器を隠さない
 	if (m_weaponState != EWeaponState::Holstering && !m_isSwitchingWeapon) { return; }
-	if (GetHealthRatio() <= 0.f) { m_laserAfterHolster = false; return; }
+	if (GetHealthRatio() <= 0.f) { m_laserAfterHolster = false; m_smashAfterHolster = false; return; }
 	m_weaponState = EWeaponState::Holstered;
+	m_weaponMontage = nullptr;
 	SetActionState(EActionState::Idle);
 	SetWeaponVisibility(false);
 
 	//武器切り替え中の場合は次の武器生成と構えへ進む
 	if (m_isSwitchingWeapon) { OnWeaponSwitchComplete(); }
+	else if (m_smashAfterHolster)
+	{
+		m_smashAfterHolster = false;
+		PerformGroundSmash();
+	}
 	else if (m_laserAfterHolster)
 	{
 		m_laserAfterHolster = false;
 		BeginLaserAttackSequence();
 	}
+}
+
+//取り出し途中の表示と、モンタージュが消えた装備待ちを解決する関数
+void AEnemyChara::UpdateWeaponAnimation()
+{
+	if (GetHealthRatio() <= 0.f || IsHidden()) { return; }
+	if (m_weaponState != EWeaponState::Drawing && m_weaponState != EWeaponState::Holstering) { return; }
+	UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	//終了側のブレンド中も操作は継続中なので、完了通知より先に収納を取り消さない
+	FAnimMontageInstance *instance = animation && m_weaponMontage ? animation->GetInstanceForMontage(m_weaponMontage) : nullptr;
+	if (instance)
+	{
+		if (m_weaponState == EWeaponState::Drawing && instance->GetPosition() >= m_weaponShowTime)
+		{
+			SetWeaponVisibility(true);
+		}
+		else if (m_weaponState == EWeaponState::Holstering && instance->GetPosition() >= m_weaponHideTime)
+		{
+			SetWeaponVisibility(false);
+		}
+		return;
+	}
+	//中断した特殊攻撃を後から発動せず、現在の武器を使用可能な状態へ戻す
+	m_meleeAfterDraw = false;
+	m_laserAfterHolster = false;
+	m_smashAfterHolster = false;
+	m_isSwitchingWeapon = false;
+	m_weaponMontage = nullptr;
+	m_weaponState = EWeaponState::Ready;
+	SetWeaponVisibility(true);
+	if (m_actionState == EActionState::DrawingWeapon || m_actionState == EActionState::HolsteringWeapon) { SetActionState(EActionState::Idle); }
 }
 
 //武器表示状態を設定する関数

@@ -31,6 +31,10 @@ UCLASS()
 class PROTECTFROMWOLF_API AEnemyAIController : public AAIController
 {
 	GENERATED_BODY()
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FEnemyTeamAwarenessTest;
+	friend struct FEnemyVisualReviewHarness;
+#endif
 
 public:
 	//退避や戦闘へ切り替える前に警戒歩行の速度を解除する関数
@@ -43,6 +47,8 @@ public:
 
 	//敵キャラクターを操作し始めた際の関数
 	virtual void OnPossess(APawn *_pawn) override;
+	//操作対象の破棄や交代時に、古い敵の参照と行動を解除する関数
+	virtual void OnUnPossess() override;
 
 	UFUNCTION(BlueprintPure, Category = "AI")
 	bool IsUsingBehaviorTree() const
@@ -122,9 +128,11 @@ public:
 
   protected:
 	//ターゲットとなるアクター
-	AActor *m_targetActor;
+	UPROPERTY(Transient)
+	AActor *m_targetActor = nullptr;
 
 	//操作対象の敵キャラクター
+	UPROPERTY(Transient)
 	AEnemyChara *m_enemy;
 
 	//巡回と追跡と戦闘を切り替える現在のAI状態

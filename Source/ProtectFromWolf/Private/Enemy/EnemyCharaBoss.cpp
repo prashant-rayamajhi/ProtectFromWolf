@@ -157,6 +157,17 @@ bool AEnemyChara::CanGroundSmash() const
 void AEnemyChara::PerformGroundSmash()
 {
 	if (m_actionState != EActionState::Idle || !GetWorld() || !CanGroundSmash() || IsKnockedBack()) { return; }
+	//収納モーションが完了してから叩きつけ攻撃を開始する
+	if (m_weaponState == EWeaponState::Ready)
+	{
+		m_smashAfterHolster = true;
+		if (IsValid(m_currentGun)) { m_currentGun->StopFire(); }
+		HolsterWeapon();
+		return;
+	}
+	if (m_weaponState != EWeaponState::Holstered) { return; }
+	m_smashAfterHolster = false;
+	SetWeaponVisibility(false);
 	//Blueprintや旧AIから呼ばれた場合も、見えていて衝撃の届く相手がいなければ跳躍を始めない
 	AActor *target = UGameplayStatics::GetPlayerPawn(GetWorld(), 0);
 	AAIController *sight = Cast<AAIController>(GetController());
@@ -285,7 +296,7 @@ void AEnemyChara::PerformTeleportToTarget()
 	FVector playerLoc = player->GetActorLocation();
 	FVector dirToPlayer = (playerLoc - GetActorLocation()).GetSafeNormal2D();
 	//プレイヤーの手前へ安全距離を空けた接近Teleport候補
-	FVector destLoc = playerLoc - dirToPlayer * 200.f;
+	FVector destLoc = playerLoc - dirToPlayer * (GetMeleeStrikeRange(player) * 0.9f);
 
 	//床と経路が確認できた候補だけを予約する
 	FVector capturedDest;
@@ -360,11 +371,15 @@ void AEnemyChara::PerformTeleportToTarget()
 				[weakThis]()
 				{
 					//敵が有効な場合だけTeleport状態を解除する
-					if (weakThis.IsValid()) { weakThis->m_isTeleporting = false; }
+					if (!weakThis.IsValid()) { return; }
+					weakThis->m_isTeleporting = false;
+					AActor *target = UGameplayStatics::GetPlayerPawn(weakThis->GetWorld(), 0);
+					if (weakThis->GetHealthRatio() > 0.f && weakThis->m_currentStyle == EEnemyAttackStyle::Melee &&
+						!weakThis->IsKnockedBack() && weakThis->CanCommitMeleeAttack(target)) { weakThis->PerformAttack(); }
 				},
-				2.0f, false);
+				0.2f, false);
 		},
-		2.0f, false);
+		0.45f, false);
 }
 
 //Teleport Away From 攻撃対象 を現在の攻撃対象へ実行する関数
@@ -540,7 +555,7 @@ void AEnemyChara::StartLaserCharge()
 //Laser攻撃Sequenceを開始する関数
 bool AEnemyChara::IsLaserSequenceActive() const
 {
-	return GetWorld() && (m_laserAfterHolster || GetWorld()->GetTimerManager().IsTimerActive(m_laserAttackTimerHandle) ||
+	return GetWorld() && (m_smashAfterHolster || m_laserAfterHolster || GetWorld()->GetTimerManager().IsTimerActive(m_laserAttackTimerHandle) ||
 		GetWorld()->GetTimerManager().IsTimerActive(m_laserStateResetTimerHandle));
 }
 

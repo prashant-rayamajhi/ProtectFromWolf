@@ -95,6 +95,8 @@ void UEnemyDecisionComponent::UpdateDecision(float _deltaTime, float _targetDist
 	//敵が無効または別行動中の場合は新しい判断を開始しない
 	if (!IsValid(m_enemy) || m_enemy->GetHealthRatio() <= 0.f || m_enemy->IsTeleporting() || m_enemy->m_isSwitchingWeapon) { return; }
 	if (m_enemy->IsAttacking() || m_enemy->IsReloading()) { return; }
+	//装備中のアニメーションが完了するまでは別の武器を選び直さない
+	if (m_enemy->GetWeaponState() == EWeaponState::Drawing || m_enemy->GetWeaponState() == EWeaponState::Holstering) { return; }
 	if (m_enemy->IsKnockedBack()) { return; }
 	//遮蔽物への移動と射撃位置からの反撃を武器切替で中断しない
 	if (_targetDistance >= 450.f && m_enemy->m_currentStyle == EEnemyAttackStyle::Gun && m_enemy->m_coverComponent &&

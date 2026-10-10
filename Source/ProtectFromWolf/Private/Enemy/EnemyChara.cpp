@@ -101,6 +101,10 @@ AEnemyChara::AEnemyChara()
 	//アセットの参照を取得する
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> combatIdleFinder(TEXT("/Game/Enemy/Animations/Boss_Animation/SK_Boss_Ile.SK_Boss_Ile"));
 	if (combatIdleFinder.Succeeded()) { m_combatIdleAnimation = combatIdleFinder.Object; }
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> gunGuard(TEXT("/Game/Enemy/Animations/Boss_Animation/Rifle_Aiming_Idle.Rifle_Aiming_Idle"));
+	if (gunGuard.Succeeded()) { m_gunGuardAnimation = gunGuard.Object; }
+	static ConstructorHelpers::FObjectFinder<UAnimSequence> swordGuard(TEXT("/Game/Enemy/Animations/Boss_Animation/Withdrawing_Sword.Withdrawing_Sword"));
+	if (swordGuard.Succeeded()) { m_swordGuardAnimation = swordGuard.Object; }
 
 	//レーザー攻撃のチャージアニメーションを取得する
 	static ConstructorHelpers::FObjectFinder<UAnimSequence> laserChargeAnimationFinder(
@@ -154,26 +158,49 @@ void AEnemyChara::Tick(float _deltaTime)
 {
 	//毎フレームの状態を更新する関数
 	Super::Tick(_deltaTime);
+	//待機状態へ変更された場合も、武器操作の中断を見逃さない
+	UpdateWeaponAnimation();
 	//経路移動が始まったフレームに待機姿勢を解除する
 	if (m_playingCombatIdle && GetVelocity().SizeSquared2D() > FMath::Square(5.f)) { StopCombatIdleAnimation(); }
 	//着地前に追跡や攻撃を再開して吹き飛び速度を消さない
 	if (IsKnockedBack()) { return; }
 	if (m_actionState == EActionState::Stunned) { SetActionState(EActionState::Idle); }
+	//体力低下による召喚で、取り出しや振り終わりの状態を途中で解除しない
+	if (m_summonPending && GetHealthRatio() > 0.f && m_actionState == EActionState::Idle && !m_isSwitchingWeapon &&
+		m_weaponState != EWeaponState::Drawing && m_weaponState != EWeaponState::Holstering && !IsLaserSequenceActive())
+	{
+		m_summonPending = false;
+		SummonMinions();
+	}
 
 	//アクション状態がIdleまたは体力が0以下の場合、経過時間をリセットして処理を終了する
 	if (m_actionState == EActionState::Idle || GetHealthRatio() <= 0.f)
 	{
 		m_actionStateElapsed = 0.f;
+		if (GetHealthRatio() > 0.f) { UpdateCombatIdleAnimation(); }
 		return;
 	}
 
 	//アクション状態がIdle以外の場合、経過時間を加算する
 	m_actionStateElapsed += _deltaTime;
-	//剣の射程外へ逃げた相手に振り続けず、近接モーションと命中判定を終了する
+	//発射通知が早すぎても、照準完了後の最初の更新で発射する
+	if (m_actionState == EActionState::Attacking && m_currentStyle == EEnemyAttackStyle::Gun) { BeginFireSequence(); }
+	if (m_meleeStrikeActive)
+	{
+		UpdateMeleeSection();
+		if (AMeleeWeapon *blade = Cast<AMeleeWeapon>(m_meleeWeapon)) { blade->UpdateSwing(); }
+	}
+	//雑魚は射程外で中断し、ボスは今の一振りを終えてから停止する
 	if (m_actionState == EActionState::Attacking && m_meleeStrikeActive &&
-		(!IsTargetWithinMeleeStrikeRange(UGameplayStatics::GetPlayerPawn(GetWorld(), 0)) ||
+		((m_enemyRank == EEnemyRank::Minion && !IsTargetWithinMeleeStrikeRange(UGameplayStatics::GetPlayerPawn(GetWorld(), 0))) ||
 		!GetMesh()->GetAnimInstance() || !GetMesh()->GetAnimInstance()->Montage_IsPlaying(m_attackMontage)))
 	{
+		//射程外による中断を通常の振り終わりと区別し、未来の剣軌道を命中させない
+		if (m_enemyRank == EEnemyRank::Minion && !IsTargetWithinMeleeStrikeRange(UGameplayStatics::GetPlayerPawn(GetWorld(), 0)))
+		{
+			m_meleeStrikeActive = false;
+			CloseMeleeHitWindow();
+		}
 		OnAttackEnd();
 		return;
 	}
@@ -206,6 +233,8 @@ void AEnemyChara::RecoverFromStalledAction()
 {
 	//吹き飛びや死亡の後に、以前の瞬間移動と召喚を実行させない
 	m_laserAfterHolster = false;
+	m_smashAfterHolster = false;
+	m_meleeAfterDraw = false;
 	m_meleeStrikeActive = false;
 	GetWorldTimerManager().ClearTimer(m_teleportTimerHandle);
 	GetWorldTimerManager().ClearTimer(m_teleportFinishTimer);
@@ -226,6 +255,7 @@ void AEnemyChara::RecoverFromStalledAction()
 	m_isSwitchingWeapon = false;
 	m_isTeleporting = false;
 	m_weaponState = EWeaponState::Ready;
+	m_weaponMontage = nullptr;
 	RestoreDefaultSpeed();
 	SetActionState(EActionState::Idle);
 }
@@ -622,8 +652,7 @@ float AEnemyChara::TakeDamage(float _damageAmount, FDamageEvent const &_damageEv
 		//召喚条件を満たしており、まだ召喚していない場合、アクション状態をIdleに設定し、ミニオンを召喚する
 		if (m_enemyRank == EEnemyRank::LastBoss && damageResult.m_crossedSummonThreshold && !m_hasSummoned)
 		{
-			SetActionState(EActionState::Idle);
-			SummonMinions();
+			m_summonPending = true;
 		}
 	}
 
@@ -710,30 +739,52 @@ EEnemyCombatPosture AEnemyChara::GetCombatPosture() const
 //戦闘待機アニメーションを更新する関数
 void AEnemyChara::UpdateCombatIdleAnimation()
 {
-	//敵のランクがミニオンの場合、またはメッシュや戦闘待機アニメーションが存在しない場合、戦闘待機アニメーションを停止する
-	if (m_enemyRank == EEnemyRank::Minion || !GetMesh() || !m_combatIdleAnimation)
+	//ボス専用の構えを通常敵へ適用しない
+	if (m_enemyRank == EEnemyRank::Minion || !GetMesh())
 	{
 		StopCombatIdleAnimation();
 		return;
 	}
 
-	//戦闘が成立しており、アクション状態がIdleで、武器切り替えやテレポート中でなく、速度が一定以下の場合に戦闘待機アニメーションを再生する
+	//次の行動を判断する短い停止中だけ構えを保ち、移動や武器操作を妨げない処理
 	const bool shouldPlayCombatIdle = IsInCombat() && m_actionState == EActionState::Idle && !m_isSwitchingWeapon && !m_isTeleporting &&
-										GetVelocity().SizeSquared2D() <= FMath::Square(5.f) && !GetCharacterMovement()->IsFalling();
-	//対象が有効な場合だけ認識したプレイヤーに対する行動を更新する
+		(m_weaponState == EWeaponState::Ready || m_weaponState == EWeaponState::Holstered) &&
+		GetVelocity().SizeSquared2D() <= FMath::Square(5.f) && !GetCharacterMovement()->IsFalling();
+	//歩き始めた時や攻撃開始時には専用の待機姿勢を解除する
 	if (!shouldPlayCombatIdle)
 	{
 		StopCombatIdleAnimation();
 		return;
 	}
 
-	//戦闘待機アニメーションが既に再生中の場合、処理を終了する
-	if (m_playingCombatIdle) { return; }
+	//収納後の素手では銃を構えず、休息動作のない姿勢を保持するための武器種
+	const EEnemyAttackStyle guardStyle = m_weaponState == EWeaponState::Ready ? m_currentStyle : EEnemyAttackStyle::Melee;
+	//同じ構えを毎フレーム再生し直さない
+	if (m_playingCombatIdle)
+	{
+		UAnimInstance *current = GetMesh()->GetAnimInstance();
+		if (current && m_idleMontage && current->Montage_IsPlaying(m_idleMontage) && m_idleStyle == guardStyle) { return; }
+		StopCombatIdleAnimation();
+		m_playingCombatIdle = false;
+		m_idleMontage = nullptr;
+	}
 
 	//AnimBPの移動状態を破棄せず、待機姿勢だけを重ねる
 	UAnimInstance *anim = GetMesh()->GetAnimInstance();
 	if (!anim) { return; }
-	m_idleMontage = anim->PlaySlotAnimationAsDynamicMontage(m_combatIdleAnimation, TEXT("DefaultSlot"), 0.15f, 0.15f, 1.f, 10000);
+	//召喚などの演出が残っている間は待機モンタージュで上書きしない
+	if (anim->IsAnyMontagePlaying()) { return; }
+	//銃は照準姿勢を維持し、剣は抜刀完了姿勢で待つ。休息用モーションは戦闘へ持ち込まない処理
+	UAnimSequence *guard = guardStyle == EEnemyAttackStyle::Gun ? m_gunGuardAnimation.Get() : m_swordGuardAnimation.Get();
+	if (!guard) { return; }
+	m_idleStyle = guardStyle;
+	m_idleMontage = anim->PlaySlotAnimationAsDynamicMontage(guard, TEXT("DefaultSlot"), 0.15f, 0.15f, 1.f, 10000);
+	if (m_idleMontage && guardStyle != EEnemyAttackStyle::Gun)
+	{
+		//抜刀そのものを繰り返さず、最後の構えだけを保持する処理
+		anim->Montage_SetPosition(m_idleMontage, FMath::Max(0.f, guard->GetPlayLength() - 0.02f));
+		anim->Montage_SetPlayRate(m_idleMontage, 0.f);
+	}
 	m_playingCombatIdle = IsValid(m_idleMontage);
 }
 

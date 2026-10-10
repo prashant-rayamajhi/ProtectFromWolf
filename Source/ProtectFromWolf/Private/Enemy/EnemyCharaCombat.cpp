@@ -149,6 +149,7 @@ void AEnemyChara::PlayAttackMontage()
 	if (!animInst->Montage_IsPlaying(m_attackMontage))
 	{
 		m_currentAttackIndex = 0;
+		m_attackHit = false;
 		const float duration = animInst->Montage_Play(m_attackMontage);
 		if (duration <= 0.f) { SetActionState(EActionState::Idle); return; }
 		//アセット側の連結設定で同じ振りが続かないよう、一回の判断では一セクションだけ再生する
@@ -161,13 +162,23 @@ void AEnemyChara::PlayAttackMontage()
 		if (m_attackMontage->IsValidSectionName(TEXT("Attack1"))) { animInst->Montage_JumpToSection(TEXT("Attack1"), m_attackMontage); }
 
 		//古い終了タイマーが次の攻撃を解除しないよう、再生中の近接モーションの終了を受け取る
-		FOnMontageEnded ended;
-		ended.BindWeakLambda(this, [this](UAnimMontage *_finished, bool _interrupted)
-		{
-			if (_finished == m_attackMontage && m_currentStyle == EEnemyAttackStyle::Melee) { OnAttackEnd(); }
-		});
-		animInst->Montage_SetEndDelegate(ended, m_attackMontage);
+		BindMeleeMontageEnd();
 	}
+}
+
+//攻撃の通常終了では命中を精算し、被弾や別行動での中断では判定を破棄する関数
+void AEnemyChara::BindMeleeMontageEnd()
+{
+	UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!animation || !m_attackMontage) { return; }
+	FOnMontageEnded ended;
+	ended.BindWeakLambda(this, [this](UAnimMontage *_finished, bool _interrupted)
+	{
+		if (_finished != m_attackMontage || m_currentStyle != EEnemyAttackStyle::Melee) { return; }
+		if (_interrupted) { m_meleeStrikeActive = false; CloseMeleeHitWindow(); }
+		OnAttackEnd();
+	});
+	animation->Montage_SetEndDelegate(ended, m_attackMontage);
 }
 
 //近接攻撃 攻撃に対応するクラス状態を更新する関数
@@ -188,6 +199,8 @@ void AEnemyChara::MeleeAttack()
 		if (meleeMontage->GetOuter() != this)
 		{
 			meleeMontage = DuplicateObject<UAnimMontage>(meleeMontage, this);
+			//一振り約一秒に対して開始ブレンド一秒では剣の振りが消えるため、構えから素早く移る
+			meleeMontage->BlendIn.SetBlendTime(0.12f);
 			meleeMontage->BlendOut.SetBlendTime(0.15f);
 			meleeMontage->BlendOutTriggerTime = -1.f;
 			m_montageMap.Add(TEXT("Melee"), meleeMontage);
@@ -206,10 +219,15 @@ void AEnemyChara::MeleeAttack()
 		//連続攻撃全体ではなく、今回再生する一振りに命中タイマーを合わせる
 		const int32 section = meleeMontage->GetSectionIndex(TEXT("Attack1"));
 		const float montageDuration = FMath::Max(section != INDEX_NONE ? meleeMontage->GetSectionLength(section) : meleeMontage->GetPlayLength(), 0.2f);
+		if (AMeleeWeapon *blade = Cast<AMeleeWeapon>(m_meleeWeapon))
+		{
+			const float start = section != INDEX_NONE ? meleeMontage->CompositeSections[section].GetTime() : 0.f;
+			blade->SetSwingAnimation(meleeMontage, start, start + montageDuration, m_meleeHitWindowStartRatio, m_meleeHitWindowEndRatio);
+		}
 		GetWorldTimerManager().SetTimer(m_meleeHitWindowOpenTimerHandle, this, &AEnemyChara::OpenMeleeHitWindow,
 										montageDuration * m_meleeHitWindowStartRatio, false);
-		GetWorldTimerManager().SetTimer(m_meleeHitWindowCloseTimerHandle, this, &AEnemyChara::CloseMeleeHitWindow,
-										montageDuration * FMath::Max(m_meleeHitWindowEndRatio, m_meleeHitWindowStartRatio + 0.05f), false);
+		GetWorldTimerManager().SetTimer(m_meleeHitWindowCloseTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this]() { CloseMeleeHitWindow(true); }),
+			montageDuration * FMath::Max(m_meleeHitWindowEndRatio, m_meleeHitWindowStartRatio + 0.05f), false);
 	}
 	else { SetActionState(EActionState::Idle); }
 }
@@ -260,11 +278,18 @@ void AEnemyChara::GunAttack()
 	//銃の発射モンタージュが存在する場合は、銃の発射モンタージュを再生する
 	if (gunMontage)
 	{
+		//元アセットを変更せず、長すぎるブレンドで構えが一秒遅れることを防ぐ
+		if (gunMontage->GetOuter() != this)
+		{
+			gunMontage = DuplicateObject<UAnimMontage>(gunMontage, this);
+			gunMontage->BlendIn.SetBlendTime(0.15f);
+			m_montageMap.Add(TEXT("Gun"), gunMontage);
+		}
 		m_attackMontage = gunMontage;
 		UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
 		//構え上げだけ速め、発射開始後は通常の再生速度へ戻す
 		//雑魚の調整済み速度を維持し、ボスの照準完了までも従来より20％速める
-		const float aimRate = 1.35f * 1.2f;
+		const float aimRate = 1.35f * 1.2f * 1.2f;
 		if (!animation || animation->Montage_Play(gunMontage, aimRate) <= 0.f)
 		{
 			SetActionState(EActionState::Idle);
@@ -479,7 +504,7 @@ void AEnemyChara::OpenMeleeHitWindow()
 }
 
 //近接攻撃 命中 受付時間を終了し、専用タイマーと一時フラグを解除する関数
-void AEnemyChara::CloseMeleeHitWindow()
+void AEnemyChara::CloseMeleeHitWindow(bool _finishSwing)
 {
 	//近接攻撃 命中 受付時間を終了する条件を満たしていない場合は、処理を終了する
 	GetWorldTimerManager().ClearTimer(m_meleeHitWindowOpenTimerHandle);
@@ -488,9 +513,16 @@ void AEnemyChara::CloseMeleeHitWindow()
 	if (!m_meleeHitWindowOpen) { return; }
 
 	//近接攻撃 命中 受付時間を終了する
+	if (AMeleeWeapon *weaponActor = Cast<AMeleeWeapon>(m_meleeWeapon)) { weaponActor->DeactivateWeapon(_finishSwing); }
 	m_meleeHitWindowOpen = false;
+}
 
-	if (AMeleeWeapon *weaponActor = Cast<AMeleeWeapon>(m_meleeWeapon)) { weaponActor->DeactivateWeapon(); }
+//射撃や遮蔽物の判断より召喚アニメーションの完了を優先する関数
+bool AEnemyChara::IsSummoning() const
+{
+	const UAnimMontage *montage = m_montageMap.FindRef(TEXT("Summon"));
+	const UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	return montage && animation && animation->GetInstanceForMontage(montage) != nullptr;
 }
 
 //ラストボスの召喚上限を守りながら援護用の雑魚敵を戦闘空間へ生成する関数
@@ -501,6 +533,8 @@ void AEnemyChara::SummonMinions()
 
 	if (m_hasSummoned) { return; }
 	m_hasSummoned = true;
+	//召喚中に待機や別の武器選択が割り込まないよう、終了まで行動を保持する
+	SetActionState(EActionState::Attacking);
 
 	//召喚モンタージュが存在する場合は、召喚モンタージュを再生する
 	bool bPlayedAnim = false;
@@ -518,6 +552,13 @@ void AEnemyChara::SummonMinions()
 			if (animDuration > 0.f)
 			{
 				bPlayedAnim = true;
+				FOnMontageEnded ended;
+				ended.BindWeakLambda(this, [this](UAnimMontage *_finished, bool _interrupted)
+				{
+					if (_interrupted) { GetWorldTimerManager().ClearTimer(m_summonTimer); }
+					if (GetHealthRatio() > 0.f && m_actionState == EActionState::Attacking) { SetActionState(EActionState::Idle); }
+				});
+				animInst->Montage_SetEndDelegate(ended, m_montageMap[TEXT("Summon")]);
 
 				//召喚モンタージュの再生時間の半分後に、召喚処理を実行するタイマーを設定する
 				GetWorldTimerManager().SetTimer(m_summonTimer, this, &AEnemyChara::ExecuteSummon, animDuration * 0.5f, false);
@@ -526,7 +567,7 @@ void AEnemyChara::SummonMinions()
 	}
 
 	//召喚モンタージュが存在しない場合は、即座に召喚処理を実行する
-	if (!bPlayedAnim) { ExecuteSummon(); }
+	if (!bPlayedAnim) { ExecuteSummon(); SetActionState(EActionState::Idle); }
 }
 
 //Summon を現在の攻撃対象へ実行する関数
@@ -635,8 +676,6 @@ void AEnemyChara::OnAttackHit()
 	//攻撃が命中した場合の処理を実行する
 	if (m_currentStyle == EEnemyAttackStyle::Melee)
 	{
-		m_attackHit = true;
-
 		//近接攻撃 命中 受付時間を開始する
 		OpenMeleeHitWindow();
 
@@ -739,16 +778,80 @@ bool AEnemyChara::CanCommitMeleeAttack(const AActor *_target) const
 	return FVector::DotProduct(GetActorForwardVector().GetSafeNormal2D(), toTarget) >= 0.72f;
 }
 
+//命中した区間だけ次の一振りを許可し、空振りでは連結しない関数
+void AEnemyChara::ConfirmMeleeHit()
+{
+	if (!m_meleeStrikeActive || !IsAttacking() || !m_meleeHitWindowOpen) { return; }
+	m_attackHit = true;
+	if (m_enemyRank == EEnemyRank::Minion || !m_attackMontage) { return; }
+	UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!animation || !animation->Montage_IsPlaying(m_attackMontage)) { return; }
+	const FName section = animation->Montage_GetCurrentSection(m_attackMontage);
+	const int32 index = m_attackMontage->GetSectionIndex(section);
+	const FName next = FName(*FString::Printf(TEXT("Attack%d"), index + 2));
+	if (index != INDEX_NONE && m_attackMontage->IsValidSectionName(next))
+	{
+		animation->Montage_SetNextSection(section, next, m_attackMontage);
+	}
+}
+
+//次の一振りへ移った時だけ命中と武器判定をリセットする関数
+void AEnemyChara::UpdateMeleeSection()
+{
+	UAnimInstance *animation = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	if (!animation || !m_attackMontage || !animation->Montage_IsPlaying(m_attackMontage)) { return; }
+	const int32 section = m_attackMontage->GetSectionIndex(animation->Montage_GetCurrentSection(m_attackMontage));
+	if (section == INDEX_NONE || section == m_currentAttackIndex) { return; }
+	m_currentAttackIndex = section;
+	m_attackHit = false;
+	m_meleeSwingPlayed = false;
+	CloseMeleeHitWindow();
+	GetWorldTimerManager().ClearTimer(m_meleeHitWindowCloseTimerHandle);
+	const float duration = m_attackMontage->GetSectionLength(section);
+	if (AMeleeWeapon *blade = Cast<AMeleeWeapon>(m_meleeWeapon))
+	{
+		const float start = m_attackMontage->CompositeSections[section].GetTime();
+		blade->SetSwingAnimation(m_attackMontage, start, start + duration, m_meleeHitWindowStartRatio, m_meleeHitWindowEndRatio);
+	}
+	GetWorldTimerManager().SetTimer(m_meleeHitWindowOpenTimerHandle, this, &AEnemyChara::OpenMeleeHitWindow, duration * m_meleeHitWindowStartRatio, false);
+	GetWorldTimerManager().SetTimer(m_meleeHitWindowCloseTimerHandle, FTimerDelegate::CreateWeakLambda(this, [this]() { CloseMeleeHitWindow(true); }), duration * m_meleeHitWindowEndRatio, false);
+}
+
 //攻撃モンタージュ終了時に攻撃状態と命中判定を解除する関数
 void AEnemyChara::OnAttackEnd()
 {
 	//死亡後や別の攻撃中に届いた通知から近接コンボを再開しない
 	if (GetHealthRatio() <= 0.f || m_actionState != EActionState::Attacking) { return; }
-	m_meleeStrikeActive = false;
-	//近接攻撃 命中 受付時間を終了する
-	CloseMeleeHitWindow();
-	GetWorldTimerManager().ClearTimer(m_meleeHitWindowCloseTimerHandle);
+	//ボスは旧終了通知で途中停止せず、現在の一振りまたはコンボの終了を待つ
+	if (m_enemyRank != EEnemyRank::Minion && m_meleeStrikeActive && GetMesh() && GetMesh()->GetAnimInstance() &&
+		GetMesh()->GetAnimInstance()->Montage_IsPlaying(m_attackMontage)) { return; }
+	//コマ落ちで終了タイマーより先に姿勢が終了しても、未検査の振り抜きを捨てない
+	if (m_meleeStrikeActive && !IsKnockedBack()) { OpenMeleeHitWindow(); CloseMeleeHitWindow(true); }
+	else { CloseMeleeHitWindow(); }
 	UAnimInstance *animInst = GetMesh() ? GetMesh()->GetAnimInstance() : nullptr;
+	//終了コマで命中を拾った場合も、命中済みのボスだけ次の一振りへ進める
+	const FName next = FName(*FString::Printf(TEXT("Attack%d"), m_currentAttackIndex + 2));
+	if (m_meleeStrikeActive && m_attackHit && m_enemyRank != EEnemyRank::Minion && animInst && m_attackMontage &&
+		m_attackMontage->IsValidSectionName(next) && IsTargetWithinMeleeStrikeRange(UGameplayStatics::GetPlayerPawn(GetWorld(), 0)))
+	{
+		GetWorldTimerManager().ClearTimer(m_meleeHitWindowCloseTimerHandle);
+		//古い終了通知から再入しないよう、次の振りを再生する前に解除する
+		FOnMontageEnded previous;
+		animInst->Montage_SetEndDelegate(previous, m_attackMontage);
+		m_meleeStrikeActive = false;
+		m_attackHit = false;
+		const float start = m_attackMontage->CompositeSections[m_attackMontage->GetSectionIndex(next)].GetTime();
+		if (animInst->Montage_Play(m_attackMontage, 1.f, EMontagePlayReturnType::MontageLength, start) > 0.f)
+		{
+			animInst->Montage_SetNextSection(next, NAME_None, m_attackMontage);
+			m_meleeStrikeActive = true;
+			UpdateMeleeSection();
+			BindMeleeMontageEnd();
+			return;
+		}
+	}
+	m_meleeStrikeActive = false;
+	GetWorldTimerManager().ClearTimer(m_meleeHitWindowCloseTimerHandle);
 
 	//攻撃モンタージュの次のセクションが有効でない場合は、攻撃モンタージュを停止する
 	m_attackHit = false;
@@ -775,6 +878,22 @@ bool AEnemyChara::IsInGunFireWindow() const
 	//銃を取り出した時刻ではなく、腕が照準姿勢に到達した時刻まで発射を待つ
 	float aimReady = 0.f;
 	float fireEnd = m_attackMontage->GetPlayLength();
+	//構え上げ区間の末尾より前の通知では発射させず、照準姿勢への到達を待つ
+	const int32 fireSection = m_attackMontage->GetSectionIndex(TEXT("Fire"));
+	if (fireSection != INDEX_NONE) { aimReady = m_attackMontage->CompositeSections[fireSection].GetTime(); }
+	for (const FSlotAnimationTrack &slot : m_attackMontage->SlotAnimTracks)
+	{
+		for (const FAnimSegment &segment : slot.AnimTrack.AnimSegments)
+		{
+			const UAnimSequenceBase *sequence = segment.GetAnimReference();
+			if (sequence && sequence->GetName().Contains(TEXT("Down")) && sequence->GetName().Contains(TEXT("Aim")) && segment.StartPos < aimReady)
+			{
+				aimReady = FMath::Max(aimReady, segment.StartPos + segment.GetLength());
+			}
+		}
+	}
+	//ブレンド中の姿勢が残っている間は照準完了とみなさない
+	aimReady = FMath::Max(aimReady, m_attackMontage->BlendIn.GetBlendTime() * animation->Montage_GetPlayRate(m_attackMontage));
 	for (const FAnimNotifyEvent &event : m_attackMontage->Notifies)
 	{
 		if (event.NotifyName == TEXT("Notify_Fire")) { fireStart = FMath::Min(fireStart, event.GetTime()); }

@@ -93,6 +93,23 @@ void AEnemyAIController::RefreshCombatAwareness()
 	if (!IsValid(m_targetActor)) { return; }
 	const bool visible = CanObserveTarget(m_targetActor);
 	UpdateVisualContact(m_targetActor, visible, m_targetActor->GetActorLocation());
+	//発見報告を取り逃した敵も、味方が直接得た情報から警戒と捜索を開始する処理
+	if (!visible)
+	{
+		for (TActorIterator<AEnemyChara> it(GetWorld()); it; ++it)
+		{
+			AEnemyChara *peer = *it;
+			if (peer == m_enemy || peer->IsHidden() || peer->GetHealthRatio() <= 0.f || !FEnemyTeamTactics::SharesRoom(m_enemy, peer)) { continue; }
+			const AEnemyAIController *source = Cast<AEnemyAIController>(peer->GetController());
+			if (!source || !IsValid(source->m_targetActor)) { continue; }
+			//伝聞を再送して警戒が永久に続かないよう、元の視認・聴覚時刻を維持する処理
+			const float seenTime = FMath::Max(source->m_lastVisualContactTime, source->m_lastPlayerNoiseTime);
+			if (GetWorld()->GetTimeSeconds() - seenTime > 20.f) { continue; }
+			const FVector location = source->m_lastVisualContactTime >= source->m_lastPlayerNoiseTime
+				? source->m_lastVisualContactLocation : source->m_lastPlayerNoiseLocation;
+			NotifyTeamContact(source->m_targetActor, location, seenTime);
+		}
+	}
 	m_enemy->SetCanSeePlayer(visible);
 	if (UBlackboardComponent *board = GetBlackboardComponent())
 	{

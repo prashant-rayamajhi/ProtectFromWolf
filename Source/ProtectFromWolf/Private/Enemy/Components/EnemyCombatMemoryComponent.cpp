@@ -1,6 +1,7 @@
 ﻿#include "Enemy/Components/EnemyCombatMemoryComponent.h"
 
 #include "Player/PlayerChara.h"
+#include "AI/Controllers/EnemyAIController.h"
 
 //敵の戦闘記憶コンポーネントに関する定数を定義する
 namespace
@@ -121,6 +122,10 @@ bool UEnemyCombatMemoryComponent::CanUseAction(FName _actionName, float _cooldow
 //戦闘か判定する関数
 bool UEnemyCombatMemoryComponent::IsInCombat() const
 {
+	//姿勢と行動で同じ警戒情報を使い、味方が交戦中なのに平常姿勢へ戻ることを防ぐ処理
+	const APawn *pawn = Cast<APawn>(GetOwner());
+	const AEnemyAIController *controller = pawn ? Cast<AEnemyAIController>(pawn->GetController()) : nullptr;
+	if (controller && controller->HasCombatAwareness()) { return true; }
 	return m_canSeeTarget || GetCurrentTime() - m_lastSeenTime <= m_combatMemoryDuration;
 }
 

@@ -60,6 +60,8 @@ void UBTService_EnemyContext::TickNode(UBehaviorTreeComponent &_ownerComp, uint8
 
 	//敵がガンスタイルで攻撃中かつ弾切れの場合、リロードを開始する
 	const bool isPaused = ASpawnEnemy::IsPhaseDisplaying();
+	//武器の取り出しと収納の途中に遮蔽物待機を割り込ませない
+	const bool changingWeapon = enemy->GetWeaponState() == EWeaponState::Drawing || enemy->GetWeaponState() == EWeaponState::Holstering;
 	AEnemyGun *gun = enemy->GetCurrentGun();
 	//銃の弾切れ中はプレイヤーを認識していても射撃可能距離として扱わない
 	if (enemy->m_currentStyle == EEnemyAttackStyle::Gun && gun && gun->IsOutOfAmmo() && gun->GetTotalAmmo() > 0 && enemy->IsAttacking())
@@ -126,6 +128,8 @@ void UBTService_EnemyContext::TickNode(UBehaviorTreeComponent &_ownerComp, uint8
 	{
 		enemy->m_combatMemoryComponent->ObservePlayer(Cast<APlayerChara>(targetActor), targetDistance, canSeeTarget, _deltaSeconds);
 	}
+	//召喚中も知覚は更新するが、遮蔽物への移動や待機で演出を中断しない
+	if (enemy->IsSummoning()) { return; }
 
 	//敵がガンスタイルで攻撃中かつカバーを使用している場合、カバーの状態を更新し、必要に応じて移動や停止を行う
 	//接近されたボスは射撃位置への移動を打ち切り、近接への切替を許可する
@@ -138,12 +142,12 @@ void UBTService_EnemyContext::TickNode(UBehaviorTreeComponent &_ownerComp, uint8
 		enemy->m_coverComponent && enemy->m_coverComponent->IsUsingCover();
 
 	//カバーを使用している場合、カバーの状態を更新し、必要に応じて移動や停止を行う
-	if (enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
+	if (!changingWeapon && enemy->m_currentStyle == EEnemyAttackStyle::Gun && enemy->m_coverComponent &&
 		(canSeeTarget || isUsingRangedCover || (enemyController && enemyController->HasCombatAwareness())))
 	{
 		enemy->m_coverComponent->UpdateRangedCombat(targetActor, canSeeTarget);
 	}
-	if (isUsingRangedCover && enemy->m_currentStyle != EEnemyAttackStyle::Gun)
+	if (!changingWeapon && !enemy->IsAttacking() && isUsingRangedCover && enemy->m_currentStyle != EEnemyAttackStyle::Gun)
 	{
 		//カバーの状態を更新し、カバーに到達していない場合は移動を開始する
 		if (!enemy->m_coverComponent->UpdateAndIsAtCover())

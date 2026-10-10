@@ -317,8 +317,7 @@ EBTNodeResult::Type UBTTask_EnemyAttack::ExecuteTask(UBehaviorTreeComponent &_ow
 	//別の攻撃またはリロードが進行中の場合は新しい攻撃を開始しない
 	if (enemy->IsAttacking() || enemy->IsReloading() || enemy->m_isSwitchingWeapon) { return EBTNodeResult::Succeeded; }
 
-	//敵の戦闘アイドルアニメーションを停止する
-	enemy->StopCombatIdleAnimation();
+	//攻撃開始前の待機姿勢は維持し、実際に攻撃状態へ変わった時だけ解除する
 
 	//遮蔽物での待機と射撃位置への移動は共通サービスへ任せる
 	if (enemy->m_coverComponent && enemy->m_coverComponent->IsUsingCover() && !enemy->m_coverComponent->HasFiringWindow()) { return EBTNodeResult::Succeeded; }
@@ -440,13 +439,30 @@ EBTNodeResult::Type UBTTask_EnemyMoveToTarget::ExecuteTask(UBehaviorTreeComponen
 			const FVector lastSeen = rangedController->GetLastKnownPlayerLocation();
 			controller->SetFocalPoint(lastSeen);
 			FVector searchPosition;
-			if (enemy->m_coverComponent->CanReposition() && FEnemyTeamTactics::CanRelocate(enemy))
+			//射線のない敵を援護射撃役として待たせず、予約済みの味方位置を避けながら捜索へ出す処理
+			if (enemy->m_coverComponent->CanReposition())
 			{
-				enemy->m_coverComponent->CommitReposition();
 				if (FEnemyTeamTactics::FindFirePosition(enemy, targetActor, searchPosition, &lastSeen))
 				{
 					controller->MoveToLocation(searchPosition, 45.f, false);
 				}
+				else if (UNavigationSystemV1 *nav = UNavigationSystemV1::GetCurrent(enemy))
+				{
+					//射撃位置が見つからない時も立ち尽くさず、味方と重ならない報告位置の手前を調べる処理
+					const FVector away = (enemy->GetActorLocation() - lastSeen).GetSafeNormal2D();
+					for (float angle : {45.f, -45.f, 90.f, -90.f})
+					{
+						FNavLocation candidate;
+						const FVector desired = lastSeen + away.RotateAngleAxis(angle, FVector::UpVector) * 450.f;
+						if (!nav->ProjectPointToNavigation(desired, candidate, FVector(120.f, 120.f, 350.f))) { continue; }
+						if (FEnemyTeamTactics::IsOccupied(enemy, candidate.Location, 250.f)) { continue; }
+						if (FVector::DistSquared2D(enemy->GetActorLocation(), candidate.Location) < FMath::Square(150.f)) { continue; }
+						UNavigationPath *path = nav->FindPathToLocationSynchronously(enemy, enemy->GetActorLocation(), candidate.Location, enemy);
+						if (!path || !path->IsValid() || path->IsPartial() || !FEnemyTeamTactics::IsSafeCombatPath(path->PathPoints, lastSeen)) { continue; }
+						if (controller->MoveToLocation(candidate.Location, 45.f, false, true, true, true, nullptr, false) != EPathFollowingRequestResult::Failed) { break; }
+					}
+				}
+				enemy->m_coverComponent->CommitReposition();
 			}
 			return EBTNodeResult::Succeeded;
 		}
@@ -665,7 +681,17 @@ void UBTTask_EnemyPatrol::TickTask(UBehaviorTreeComponent &_ownerComp, uint8 *_n
 	}
 
 	//発見や被弾による戦闘移行を、巡回の移動完了や三秒待機より優先する
-	if (AEnemyAIController *enemyController = Cast<AEnemyAIController>(controller)) { enemyController->RefreshCombatAwareness(); }
+	if (AEnemyAIController *enemyController = Cast<AEnemyAIController>(controller))
+	{
+		enemyController->RefreshCombatAwareness();
+		//Blackboardの更新を待たず、交戦報告を受けた時点で巡回を終える処理
+		if (enemyController->HasCombatAwareness())
+		{
+			controller->StopMovement();
+			FinishLatentTask(_ownerComp, EBTNodeResult::Succeeded);
+			return;
+		}
+	}
 	const UBlackboardComponent *blackboard = _ownerComp.GetBlackboardComponent();
 	if (blackboard && (blackboard->GetValueAsBool(EnemyBlackboardKeys::CanSeeTarget) ||
 		blackboard->GetValueAsBool(EnemyBlackboardKeys::IsPaused) || blackboard->GetValueAsBool(EnemyBlackboardKeys::IsDead) ||

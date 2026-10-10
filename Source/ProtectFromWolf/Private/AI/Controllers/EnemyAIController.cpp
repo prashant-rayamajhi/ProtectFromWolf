@@ -90,6 +90,20 @@ void AEnemyAIController::OnPossess(APawn *_pawn)
 	//敵へ実行するBehavior Tree Asset
 	UBehaviorTree *behaviorTree = m_behaviorTreeAsset.LoadSynchronous();
 	m_usingBehaviorTree = behaviorTree && RunBehaviorTree(behaviorTree);
+	//初回の定期更新を待たず、その場から見える相手を認識する
+	RefreshCombatAwareness();
+}
+
+//操作解除後に破棄済みの敵へTickがアクセスしないよう参照と行動を停止する関数
+void AEnemyAIController::OnUnPossess()
+{
+	if (UBrainComponent *brain = GetBrainComponent()) { brain->StopLogic(TEXT("Pawn released")); }
+	m_enemy = nullptr;
+	m_targetActor = nullptr;
+	m_usingBehaviorTree = false;
+	m_cautious = false;
+	m_hasActiveVisualContact = false;
+	Super::OnUnPossess();
 }
 
 //プレイヤーの物音位置を記憶してBlackboardの攻撃対象を更新する関数
@@ -189,6 +203,8 @@ void AEnemyAIController::Tick(float _deltaTime)
 {
 	//親クラスのTick処理を実行する
 	Super::Tick(_deltaTime);
+	//敵の破棄後と操作対象の交代中は、古い参照から戦闘処理を呼ばない
+	if (!IsValid(m_enemy) || GetPawn() != m_enemy) { return; }
 	//未視認の警戒中だけ減速し、発見・退避・被弾時には戦闘側へ速度管理を返す
 	if (IsValid(m_enemy) && m_enemy->GetCharacterMovement())
 	{
@@ -282,6 +298,8 @@ void AEnemyAIController::Tick(float _deltaTime)
 
 	//現在の状況に応じてAIの状態を決定する
 	UpdateStateLogic();
+	//捜索中は旧戦闘処理から見えていないプレイヤーの現在位置へ移動先を上書きしない処理
+	if (HasCombatAwareness() && !HasActiveVisualContact() && m_currentState != EAIState::Retreat && m_currentState != EAIState::LaserPreparation) { return; }
 
 	//決定された状態に基づいて具体的な行動を実行する
 	switch (m_currentState)
@@ -369,6 +387,7 @@ bool AEnemyAIController::CheckLineOfSight()
 	if (!m_enemy || !m_targetActor) { return false; }
 	//従来の状態機械でもBehavior Treeと同じ視野角を使用する
 	const bool bCanSee = CanObserveTarget(m_targetActor);
+	UpdateVisualContact(m_targetActor, bCanSee, m_targetActor->GetActorLocation());
 
 	//視界の状態が切り替わった場合のみ処理を実行する
 	if (bCanSee != m_lastCanSeePlayer)
@@ -414,7 +433,7 @@ void AEnemyAIController::UpdateWeaponState()
 		}
 	}
 	//プレイヤーが遠すぎるか見失った場合は武器をしまう
-	else if (distSq > chaseSq * 1.5f || !bCanSee)
+	else if (!HasCombatAwareness() && (distSq > chaseSq * 1.5f || !bCanSee))
 	{
 		//攻撃とリロードの途中では武器収納を開始しない
 		if (!m_enemy->IsAttacking() && !m_enemy->IsReloading())

@@ -65,6 +65,8 @@ class PROTECTFROMWOLF_API AEnemyChara : public ACharacter
 {
 	GENERATED_BODY()
 	friend class FEnemyDelayedCancelTest;
+	friend struct FEnemyVisualReviewHarness;
+	friend class FEnemyWeaponRestoreTest;
 
 	//ボスと近接雑魚の通常歩行にだけ適用する速度倍率
 	static constexpr float m_walkScale = 0.85f;
@@ -106,7 +108,7 @@ class PROTECTFROMWOLF_API AEnemyChara : public ACharacter
 
 	//近接攻撃の命中判定を終了する関数
 	UFUNCTION(BlueprintCallable, Category = "Enemy|Combat")
-	void CloseMeleeHitWindow();
+	void CloseMeleeHitWindow(bool _finishSwing = false);
 
 	//リロード状態を設定する関数
 	void SetReloadState(bool _isReloading);
@@ -245,6 +247,8 @@ class PROTECTFROMWOLF_API AEnemyChara : public ACharacter
 
 	//雑魚敵を召喚する処理を行う関数
 	void SummonMinions();
+	//召喚中に射撃停止や遮蔽物移動が割り込まないよう再生状態を調べる関数
+	bool IsSummoning() const;
 
 	//武器の切り替えを行う処理を行う関数
 	void SwitchWeapon(EEnemyAttackStyle _newStyle);
@@ -284,11 +288,21 @@ class PROTECTFROMWOLF_API AEnemyChara : public ACharacter
 
 	//レーザー開始前に武器の収納完了を待っている状態
 	bool m_laserAfterHolster = false;
+	//叩きつけ攻撃の前に武器収納を待つ状態
+	bool m_smashAfterHolster = false;
+	//近接武器への変更後、一度だけ接近する予約
+	bool m_meleeAfterDraw = false;
+	//実際にダメージを与えた一振りだけ次のコンボへ接続する関数
+	void ConfirmMeleeHit();
+	//コンボの各区間で命中判定を初期化する関数
+	void UpdateMeleeSection();
 
   public:
 	//現在の攻撃形式に対応する攻撃モンタージュを再生する関数
 	UFUNCTION(BlueprintCallable, Category = "Animation")
 	void PlayAttackMontage();
+	//近接モーションの正常終了と中断を区別して処理する関数
+	void BindMeleeMontageEnd();
 
 	//攻撃アニメーションの終了時に呼ばれる処理を行う関数
 	UFUNCTION(BlueprintCallable, Category = "Animation")
@@ -408,6 +422,14 @@ class PROTECTFROMWOLF_API AEnemyChara : public ACharacter
 	//ボスが攻撃選択中に構えを維持する戦闘待機アニメーション
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Combat Idle")
 	TObjectPtr<UAnimSequence> m_combatIdleAnimation;
+	//射撃の合間も銃を構え続ける待機モーション
+	UPROPERTY(EditDefaultsOnly, Category = "Animation|Combat Idle")
+	TObjectPtr<UAnimSequence> m_gunGuardAnimation;
+	//抜刀後の構えを近接戦闘の待機姿勢に使うモーション
+	UPROPERTY(EditDefaultsOnly, Category = "Animation|Combat Idle")
+	TObjectPtr<UAnimSequence> m_swordGuardAnimation;
+	//現在表示している待機姿勢の武器種
+	EEnemyAttackStyle m_idleStyle = EEnemyAttackStyle::Melee;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Animation|Boss Laser")
 	//レーザー発射前の溜め動作として再生するAnimation Sequence
@@ -472,6 +494,22 @@ class PROTECTFROMWOLF_API AEnemyChara : public ACharacter
 	//現在の武器の状態
 	UPROPERTY(VisibleAnywhere, Category = "Weapon")
 	EWeaponState m_weaponState;
+
+	//武器操作の中断と完了を、その操作を開始したモンタージュだけで判定する変数
+	UPROPERTY(Transient)
+	TObjectPtr<UAnimMontage> m_weaponMontage;
+	//取り出しアニメーションの四フレーム目に武器を表示するための再生位置
+	float m_weaponShowTime = 0.f;
+	//収納動作で銃が背中へ回った時点を指定する再生位置の割合
+	UPROPERTY(EditDefaultsOnly, Category = "Animation|Weapon", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float m_gunHideRatio = 0.4f;
+	//収納モンタージュで手元の武器を非表示にする再生時刻
+	float m_weaponHideTime = 0.f;
+	//体力条件を満たした召喚を現在の攻撃や装備変更の完了後に一度だけ行う変数
+	bool m_summonPending = false;
+
+	//武器操作の再生位置から表示と中断後の復帰を更新する関数
+	void UpdateWeaponAnimation();
 
 	//召喚時のエフェクト
 	UPROPERTY(EditDefaultsOnly, Category = "Effects")

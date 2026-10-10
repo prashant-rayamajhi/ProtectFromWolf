@@ -15,19 +15,28 @@ void AEnemyAIController::UpdateStateLogic()
 	if (!m_enemy || !m_targetActor) { return; }
 	//退避中やレーザー準備中は状態の切り替えを行わない
 	if (m_currentState == EAIState::Retreat || m_currentState == EAIState::LaserPreparation) { return; }
+	//旧行動処理でも、味方の報告が残る間は巡回せず確認済みの場所を捜索する処理
+	RefreshCombatAwareness();
+	if (HasCombatAwareness() && !HasActiveVisualContact())
+	{
+		if (m_enemy->IsAttacking() || m_enemy->IsReloading() || m_enemy->m_isSwitchingWeapon) { return; }
+		m_currentState = m_enemy->m_currentStyle == EEnemyAttackStyle::Melee ? EAIState::CombatMelee : EAIState::CombatRangeMove;
+		ClearFocus(EAIFocusPriority::Gameplay);
+		SetFocalPoint(GetLastKnownPlayerLocation());
+		if (GetMoveStatus() != EPathFollowingStatus::Moving) { MoveToLocation(GetLastKnownPlayerLocation(), 150.f, false); }
+		return;
+	}
 
 	//状態切り替え判定へ使用するプレイヤーとの二乗距離
 	const float distSq = FVector::DistSquared(m_enemy->GetActorLocation(), m_targetActor->GetActorLocation());
-	//戦闘を開始または終了する追跡範囲の二乗値
-	const float chaseSq = FMath::Square(m_enemy->GetChaseRange());
 
-	//戦闘中にプレイヤーが遠ざかったり見失ったりした場合はパトロールに戻る
+	//視認、物音、味方からの報告がすべて途切れた後にだけ巡回へ戻す処理
 	if (m_currentState == EAIState::CombatMelee || m_currentState == EAIState::CombatRangeMove || m_currentState == EAIState::CombatRangeHide)
 	{
-		//追跡範囲を離れるか視認を失った場合は戦闘を終了する
-		if (distSq > chaseSq * 1.2f || !m_enemy->CanSeePlayer())
+		//遮蔽物で一時的に見えなくなっても戦闘を終了しない
+		if (!HasCombatAwareness())
 		{
-			//戦闘中にプレイヤーを見失った場合は、攻撃やリロード中でなければパトロール状態に戻す
+			//攻撃や弾薬補充の途中で巡回へ切り替えない
 			if (m_enemy->IsAttacking() || m_enemy->IsReloading()) { return; }
 			m_currentState = EAIState::Move;
 			m_enemy->SetActionState(EActionState::Idle);
@@ -39,8 +48,8 @@ void AEnemyAIController::UpdateStateLogic()
 	//パトロール中にプレイヤーを発見していない場合はそのまま処理を終了する
 	if (m_currentState == EAIState::Move || m_currentState == EAIState::Wait)
 	{
-		//プレイヤーを視認して追跡範囲へ入るまでは巡回を継続する
-		if (!m_enemy->CanSeePlayer() || distSq > chaseSq) { return; }
+		//自分や味方が危険を察知するまでは巡回を継続する
+		if (!HasCombatAwareness()) { return; }
 	}
 
 	//銃攻撃を継続できず近接へ切り替える必要があるか示す状態
