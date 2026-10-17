@@ -1,12 +1,13 @@
 # 掲載ソースについて
 
-2026年10月10日更新。現在の掲載対象は52ファイルです。同日の元プロジェクトと照合した担当範囲のコードを掲載しています。
+2026年10月17日更新。現在の掲載対象は53ファイルです。10月10日に照合・掲載した52ファイルに、本人から掲載指定のあった`PlayerCharaMovement.cpp`を17日の開発プロジェクトから追加しました。
 
 - `Private/AI`・`Public/AI`：Controllerの分割実装、BTのTask・Service・Decorator、Blackboard。
 - `Private/Enemy`・`Public/Enemy`：通常敵・ボス、戦闘、状態・体力・行動判断・戦闘記憶・遮蔽物・連携・テレポート配置。
 - `Weapons/EnemyGun`・`EnemyBullet`・`EnemyMeleeWeapon`：敵専用の銃、弾、近接武器（cpp／h）。
 - `Combat/FireComponent`・`MeleeComponent`：敵用の射撃・近接部品（cpp／h）。すべての攻撃がこれらだけで実行されるという意味ではありません。
 - `Player/WerewolfFormComponent`：人型と人狼の変身・解除（cpp／h）。
+- `Private/Player/PlayerCharaMovement.cpp`：移動・視点・ジャンプ入力、足音と物音通知、変身開始と解除の連携。プレイヤー全体ではなく分割実装の一部です。対応する共有ヘッダー`PlayerChara.h`は今回の追加対象に含めていません。
 - `Combat/AttackNotifyState`：敵と狼男の近接攻撃で、命中判定を受け付ける区間の開始・終了（cpp／h）。
 - `Combat/CombAnimNotifyState`：狼男コンボの次の入力を受け付ける区間の開始・終了（cpp／h）。
 - `Player/AnimNotify_ReloadComplete`：リロード動作の通知から弾薬補充を確定する処理への接続（cpp／h）。

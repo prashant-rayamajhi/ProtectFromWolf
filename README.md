@@ -18,7 +18,7 @@
 
 ## 掲載している担当範囲
 
-- プレイヤーキャラクターの一部：人型と人狼の変身・解除処理
+- プレイヤーキャラクターの一部：移動入力・視点制御、人型と人狼の変身・解除処理
 - 通常敵・中間ボス・ラストボスのキャラクター制御
 - 敵専用の銃・弾・近接武器と敵側の戦闘処理
 - 敵AIの知覚、捜索、状態管理、攻撃判断、移動、遮蔽物利用、味方との連携
@@ -29,6 +29,7 @@
 | 分野 | 主なソース |
 | --- | --- |
 | 変身と解除 | [WerewolfFormComponent.cpp](Source/ProtectFromWolf/Private/Player/WerewolfFormComponent.cpp) |
+| プレイヤーの移動・視点と変身の連携 | [PlayerCharaMovement.cpp](Source/ProtectFromWolf/Private/Player/PlayerCharaMovement.cpp) |
 | 敵用武器 | [Weapons](Source/ProtectFromWolf/Private/Weapons) |
 | 戦闘・ボス技 | [EnemyCharaCombat.cpp](Source/ProtectFromWolf/Private/Enemy/EnemyCharaCombat.cpp)、[EnemyCharaBoss.cpp](Source/ProtectFromWolf/Private/Enemy/EnemyCharaBoss.cpp) |
 | 敵用攻撃部品 | [Combat](Source/ProtectFromWolf/Private/Combat) |
@@ -37,7 +38,9 @@
 | 命中・コンボ受付の通知 | [AttackNotifyState.cpp](Source/ProtectFromWolf/Private/Combat/AttackNotifyState.cpp)、[CombAnimNotifyState.cpp](Source/ProtectFromWolf/Private/Combat/CombAnimNotifyState.cpp) |
 | リロード完了通知 | [AnimNotify_ReloadComplete.cpp](Source/ProtectFromWolf/Private/Player/AnimNotify_ReloadComplete.cpp) |
 
-対応するヘッダーは`Public`に掲載しています。2026年10月10日時点の担当範囲の最新コード52ファイルを収録しています。[掲載範囲の詳細](Source/README.md)も参照してください。
+2026年10月17日に、本人から掲載指定のあった`PlayerCharaMovement.cpp`を開発プロジェクトから追加し、掲載コードは53ファイルになりました。他の52ファイルは10月10日掲載時点の内容です。各部品のヘッダーは`Public`に掲載していますが、`PlayerCharaMovement.cpp`が依存する`PlayerChara.h`は未掲載です。[掲載範囲の詳細](Source/README.md)も参照してください。
+
+`PlayerCharaMovement.cpp`では、カメラの向きを基準にした水平移動、FPS／TPSのカメラ切り替え、ジャンプ入力、足音と敵への物音通知、変身の開始・解除を扱っています。プレイヤー全体を単独担当したという意味ではありません。今回の追加に伴う配布版の更新はありません。
 
 ## フローチャート
 
