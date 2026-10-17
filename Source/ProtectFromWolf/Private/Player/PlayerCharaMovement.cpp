@@ -154,7 +154,7 @@ void APlayerChara::UpdateCamera(float _deltaTime)
 		m_enhancedState && m_werewolfFormComponent ? m_werewolfFormComponent->GetCameraSocketOffset() : m_defaultCameraSocketOffset;
 	m_springArm->SocketOffset = FMath::VInterpTo(m_springArm->SocketOffset, targetSocketOffset, _deltaTime, m_cameraTransitionSpeed);
 
-	const FVector targetRelativeLocation = m_enhancedState ? m_werewolfFormComponent->GetCameraPivotOffset() : m_humanCameraOffset;
+	const FVector targetRelativeLocation = m_enhancedState && m_werewolfFormComponent ? m_werewolfFormComponent->GetCameraPivotOffset() : m_humanCameraOffset;
 	m_springArm->SetRelativeLocation(
 		FMath::VInterpTo(m_springArm->GetRelativeLocation(), targetRelativeLocation, _deltaTime, m_cameraTransitionSpeed));
 }
@@ -417,43 +417,33 @@ float APlayerChara::GetEnhanceGaugeRatio() const
 //放射状の衝撃を追加する関数
 void APlayerChara::AddRadialForces()
 {
-
+	if (!GetWorld()) { return; }
 	m_impulse = true;
-
-	//命中を一括処理するために収集する配列
+	//変身の周囲にいる敵を壁や他の敵に遮られず候補として集める
 	TArray<FHitResult> hits;
-	FVector location = GetActorLocation();
-	//担当機能の状態を更新するために使用するStart
-	FVector start = location;
-	//担当機能の状態を更新するために使用するEnd
-	FVector end = location;
-	FCollisionShape collisionArea = FCollisionShape::MakeSphere(m_radius);
-	bool isHit = GetWorld()->SweepMultiByChannel(hits, start, end, FQuat::Identity, ECC_WorldDynamic, collisionArea);
-
-	if (isHit)
+	const FVector location = GetActorLocation();
+	FCollisionQueryParams query;
+	query.AddIgnoredActor(this);
+	GetWorld()->SweepMultiByObjectType(hits, location, location, FQuat::Identity, FCollisionObjectQueryParams(ECC_Pawn),
+		FCollisionShape::MakeSphere(FMath::Max(1.f, m_radius)), query);
+	//メッシュとカプセルの両方へ接触しても同じ敵を繰り返し押し出さない
+	TSet<AEnemyChara *> affected;
+	for (const FHitResult &hit : hits)
 	{
-		//命中を順番に処理して入力方向を移動とAnimationへ反映する
-		for (auto &hit : hits)
-		{
-			AActor *hitActor = hit.GetActor();
-			//敵へ安全にアクセスする参照
-			AEnemyChara *enemy = Cast<AEnemyChara>(hitActor);
-
-			//無効な敵を除外して残りの要素だけを処理する
-			if (!enemy) continue;
-
-			if (hitActor->ActorHasTag("Enemy") && IsValid(enemy))
-			{
-				UPrimitiveComponent *hitComp = hit.GetComponent();
-
-				if (hitComp)
-				{
-					FVector dir = (enemy->GetActorLocation() - location).GetSafeNormal();
-
-					enemy->LaunchCharacter(dir * 8000, true, true);
-				}
-			}
-		}
+		AEnemyChara *enemy = Cast<AEnemyChara>(hit.GetActor());
+		if (!IsValid(enemy) || enemy->GetHealthRatio() <= 0.f || affected.Contains(enemy)) { continue; }
+		affected.Add(enemy);
+		//変身の衝撃は壁を通過させない
+		FCollisionQueryParams sightQuery;
+		sightQuery.AddIgnoredActor(this);
+		sightQuery.AddIgnoredActor(enemy);
+		FHitResult wall;
+		if (GetWorld()->LineTraceSingleByChannel(wall, location, enemy->GetActorLocation(), ECC_Visibility, sightQuery)) { continue; }
+		FVector direction = (enemy->GetActorLocation() - location).GetSafeNormal2D();
+		if (direction.IsNearlyZero()) { direction = GetActorForwardVector().GetSafeNormal2D(); }
+		//変身は足元の空間を確保する弱い押し戻しに留め、最後のキックより短くする
+		const float scale = enemy->m_enemyRank == EEnemyRank::MiddleBoss ? 0.45f : enemy->m_enemyRank == EEnemyRank::LastBoss ? 0.22f : 1.f;
+		enemy->ApplyKnockback(direction * (300.f * scale) + FVector::UpVector * 120.f);
 	}
 }
 
