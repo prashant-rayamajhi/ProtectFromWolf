@@ -4,7 +4,7 @@
 
 ## 作品概要
 
-最新のWindows配布版は**2026年10月17日更新**です。狼男の攻撃軌跡・命中時の揺れ・キックの押し戻しを調整し、変身時に敵を遠くへ飛ばしていた処理も修正しました。[最新版のダウンロードと更新内容](https://github.com/prashant-rayamajhi/ProtectFromWolf/releases/tag/v2026.10.17-wolf-feedback)をご確認ください。
+最新のWindows配布版は**2026年10月19日更新**です。狼男の両手の発光とSlash風の攻撃軌跡、キックの威力、ジャンプ高さを調整しました。[最新版のダウンロードと更新内容](https://github.com/prashant-rayamajhi/ProtectFromWolf/releases/tag/v2026.10.19-wolf-slash-jump)をご確認ください。
 
 銃を使う人型のFPS操作と、人狼へ変身した後のTPS近接戦闘を切り替えて戦うアクションゲームです。
 
@@ -38,7 +38,7 @@
 | 命中・コンボ受付の通知 | [AttackNotifyState.cpp](Source/ProtectFromWolf/Private/Combat/AttackNotifyState.cpp)、[CombAnimNotifyState.cpp](Source/ProtectFromWolf/Private/Combat/CombAnimNotifyState.cpp) |
 | リロード完了通知 | [AnimNotify_ReloadComplete.cpp](Source/ProtectFromWolf/Private/Player/AnimNotify_ReloadComplete.cpp) |
 
-2026年10月17日に、本人から掲載指定のあった`PlayerCharaMovement.cpp`を開発プロジェクトから追加し、掲載コードは53ファイルになりました。他の52ファイルは10月10日掲載時点の内容です。各部品のヘッダーは`Public`に掲載していますが、`PlayerCharaMovement.cpp`が依存する`PlayerChara.h`は未掲載です。[掲載範囲の詳細](Source/README.md)も参照してください。
+2026年10月19日現在、掲載コードは54ファイルです。17日に追加した`PlayerCharaMovement.cpp`に加え、19日は変身部品を更新し、そのジャンプ高さ計算に必要な[JumpHeight.h](Source/ProtectFromWolf/Public/Player/JumpHeight.h)を追加しました。各部品のヘッダーは`Public`に掲載していますが、共有の`PlayerChara.h`は未掲載です。[掲載範囲の詳細](Source/README.md)も参照してください。
 
 `PlayerCharaMovement.cpp`では、カメラの向きを基準にした水平移動、FPS／TPSのカメラ切り替え、ジャンプ入力、足音と敵への物音通知、変身の開始・解除を扱っています。プレイヤー全体を単独担当したという意味ではありません。10月17日の配布更新に合わせ、変身時の押し戻しの修正も反映しています。
 
@@ -81,6 +81,17 @@ Blackboard、状態、攻撃候補の点数、移動先などを確認し、画�
 ## ゲームの入手と起動
 
 [最新Windows版](https://github.com/prashant-rayamajhi/ProtectFromWolf/releases/latest)のAssetsから **`ProtectFromWolf.zip`** をダウンロードし、全体を展開して **`Windows/ProtectFromWolf.exe`** を起動します。EXEだけを取り出さず、付属フォルダも一緒に保持してください。配布ZIPには実行に必要なファイルのみを収録し、元プロジェクトやC++ソースコードは含めていません。
+
+### 2026年10月19日の更新
+
+- 狼男の両手に青い発光を追加。攻撃中は手足の動きに沿うSlash風の短い軌跡を表示します。
+- コンボ最後のキックのダメージ倍率を1.35に変更。命中時だけヒットストップとカメラシェイクを適用する仕組みは維持しています。
+- 高すぎたジャンプを見直し、人型120cm・狼男150cmを基準とする高さ上限から初速を計算。重力を考慮し、変身を繰り返しても値が累積しないようにしています。
+- 公開済みの担当コードを開発プロジェクトと照合。変身部品2ファイルを更新し、ジャンプ計算の補助ヘッダーを追加しました。エフェクト等の共有実装全体は新たに公開していません。
+
+**個別確認：** 自動テスト39件は失敗0件（うち警告付き成功6件）。実マップ・実モデルで狼男の3段それぞれの命中／空振り6条件と、人型・狼男・解除・再変身を含むジャンプ5条件を確認しました。通常操作でのゲームクリアまでの通し確認ではありません。
+
+**配布確認：** Shippingビルドと素材の組み込みが成功し、ZIP内の実行用27ファイルを元データと照合しました。今回の配布EXEは画面操作機能のアクセス拒否により起動確認できていません。個別検証の結果と、配布版での実プレイ確認は区別しています。
 
 ### 2026年10月17日の更新
 

@@ -26,9 +26,12 @@ struct PROTECTFROMWOLF_API FWerewolfFormSettings
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0"))
 	float m_walkSpeed = 1500.f;
 
-	//Jump Velocity を距離または移動量として調整する数値
+	//旧BPのジャンプ初速を保持し、低い設定を高さ調整で引き上げないための上限
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0"))
 	float m_jumpVelocity = 850.f;
+	//狼男が踏み切った足元から頂点まで上がる高さの上限をセンチメートルで指定する
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Movement", meta = (ClampMin = "0.0", ClampMax = "200.0", Units = "cm"))
+	float m_jumpHeight = 150.f;
 
 	//カメラ Arm Length を距離または移動量として調整する数値
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Camera", meta = (ClampMin = "0.0"))

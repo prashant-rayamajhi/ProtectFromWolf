@@ -1,6 +1,7 @@
 ﻿#include "Player/WerewolfFormComponent.h"
 
 #include "Animation/AnimInstance.h"
+#include "Player/JumpHeight.h"
 #include "Animation/AnimMontage.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -156,7 +157,8 @@ bool UWerewolfFormComponent::EnterForm(APlayerChara *_player)
 	}
 
 	movement->MaxWalkSpeed = m_settings.m_walkSpeed;
-	movement->JumpZVelocity = m_settings.m_jumpVelocity;
+	//毎回設定値から計算し、変身を繰り返してもジャンプ力を累積させない
+	movement->JumpZVelocity = JumpHeight::LimitSpeed(m_settings.m_jumpVelocity, movement->GetGravityZ(), m_settings.m_jumpHeight);
 	return true;
 }
 

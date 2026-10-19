@@ -25,7 +25,7 @@ flowchart TD
     I -->|いいえ| K["Mesh Boundsの下端を接地基準にする"]
     J --> L["接地基準とCapsule底面の差でMesh位置を補正"]
     K --> L
-    L --> M["狼男の移動速度・ジャンプ力を適用して成功を返す"]
+    L --> M["狼男の移動速度を適用し、重力と高さ上限からジャンプ初速を制限"]
     M -.->|呼び出し側から解除要求| N["ExitForm：復元に必要な参照を確認"]
     N --> O{"復元に必要な参照が有効か"}
     O -->|いいえ| P["変更せず終了"]
@@ -36,7 +36,9 @@ flowchart TD
 
 人型の寸法は最初の変身時だけ保存します。解除時に狼男の値を基準に逆算し続けず、保存した値へ戻すことで補正の累積を避けています。人型のMesh・AnimBP・移動性能は解除時の引数で受け取ります。変身の受付、残り時間、カメラ演出はこの部品の外側で管理されるため、図の対象外です。
 
-参照：[WerewolfFormComponent.cpp](../Source/ProtectFromWolf/Private/Player/WerewolfFormComponent.cpp) の `EnterForm`・`ExitForm`。
+ジャンプ初速は毎回設定値から求め、現在値に倍率を掛け続けないようにしています。高さ上限から求めた初速と既存の設定値のうち低い方を使用します。
+
+参照：[WerewolfFormComponent.cpp](../Source/ProtectFromWolf/Private/Player/WerewolfFormComponent.cpp) の `EnterForm`・`ExitForm`、[JumpHeight.h](../Source/ProtectFromWolf/Public/Player/JumpHeight.h)。
 
 ## 2. 敵が判断に使う情報の更新
 
