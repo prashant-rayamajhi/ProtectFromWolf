@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
@@ -10,20 +10,24 @@ class UNiagaraSystem;
 class USoundBase;
 
 UCLASS()
+
 //敵のバースト射撃、照準、発射演出を管理する銃
 class PROTECTFROMWOLF_API AEnemyGun : public AActor
 {
 	GENERATED_BODY()
 
   public:
+
 	//敵の銃身と銃口とバースト弾薬の初期値を設定する関数
 	AEnemyGun();
 
   protected:
-	//ゲーム開始時に装備する敵と銃口エフェクトを取得する関数
+
+	//装弾数を初期化し、BPの射撃設定を検証する関数
 	virtual void BeginPlay() override;
 
   public:
+
 	//射撃射程を取得する関数
 	float GetFireRange() const
 	{
@@ -42,7 +46,7 @@ class PROTECTFROMWOLF_API AEnemyGun : public AActor
 	//弾薬を消費する関数
 	bool ConsumeAmmo();
 
-	//出力する弾薬か判定する関数
+	//マガジンの弾切れを判定する関数
 	bool IsOutOfAmmo() const
 	{
 		return m_currentAmmo <= 0;
@@ -69,17 +73,19 @@ class PROTECTFROMWOLF_API AEnemyGun : public AActor
 		return m_canFire && m_currentAmmo > 0;
 	}
 
-	//マガジン大きさを取得する関数
+	//マガジンに装填できる弾数を取得する関数
 	int32 GetClipSize() const
 	{
 		return m_clipSize;
 	}
 
   private:
+
 	//射撃を初期状態へ戻す関数
 	void ResetFire();
 
   protected:
+
 	//敵の銃へ一度に装填できる最大弾薬数
 	UPROPERTY(EditAnywhere, Category = "Stats")
 	int32 m_clipSize;
@@ -113,6 +119,7 @@ class PROTECTFROMWOLF_API AEnemyGun : public AActor
 	float m_burstCooldown;
 
   private:
+
 	//銃の配置基準となるルートコンポーネント
 	UPROPERTY(VisibleAnywhere)
 	USceneComponent *m_sceneComp;
@@ -137,21 +144,32 @@ class PROTECTFROMWOLF_API AEnemyGun : public AActor
 	UPROPERTY(EditDefaultsOnly, Category = "Effects|SciFi")
 	UNiagaraSystem *m_enemyMuzzlePulseNiagara;
 
+	//銃口の発光が視界を覆わない大きさを指定する
+	UPROPERTY(EditDefaultsOnly, Category = "Effects|SciFi", meta = (ClampMin = "0.001", ClampMax = "0.1"))
+	float m_muzzleScale = 0.03f;
+
+	//一発の銃口発光を表示する秒数
+	UPROPERTY(EditDefaultsOnly, Category = "Effects|SciFi", meta = (ClampMin = "0.02", ClampMax = "0.3"))
+	float m_muzzleLife = 0.12f;
+
 	//発射時の効果音
 	UPROPERTY(EditDefaultsOnly, Category = "Effects")
 	USoundBase *m_muzzleSound;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Effects")
+
 	//遠距離ミニオンがバースト射撃する時に再生するパルス銃声音
 	USoundBase *m_minionPulseSound;
 
 	//敵のバースト射撃で次の一発を発射するタイマー
 	FTimerHandle m_autoFireTimer;
+
 	//バースト再使用待ち時間タイマーかどうか
 	FTimerHandle m_burstCooldownTimer;
 
 	//残弾と射撃間隔を確認して次の弾を発射できるか示す変数
 	bool m_canFire;
+
 	//一回の攻撃命令で連続発射する敵弾の数
 	int32 m_shotsInBurst;
 };

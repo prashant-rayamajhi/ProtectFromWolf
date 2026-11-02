@@ -13,6 +13,7 @@ class UProjectileMovementComponent;
 class UNiagaraComponent;
 class UNiagaraSystem;
 class UCombatTracer;
+class USoundBase;
 
 UCLASS()
 //敵弾の飛翔、衝突、プレイヤーダメージを管理する弾丸
@@ -57,6 +58,10 @@ class PROTECTFROMWOLF_API AEnemyBullet : public AActor
 	//弾丸がワールドまたはキャラクターへ衝突した地点に一度だけ生成する命中エフェクト
 	UPROPERTY(EditDefaultsOnly, Category = "Effects")
 	UNiagaraSystem *m_impactEffect;
+
+	//着弾地点で一度だけ再生する音を弾のBPから指定する
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Effects|Audio")
+	TObjectPtr<USoundBase> m_impactSound = nullptr;
 
   private:
 	//この弾を移動時の障害物から除外した味方のカプセル

@@ -4,6 +4,8 @@
 
 ## 作品概要
 
+2026年11月2日：敵武器の`AEnemyGun`・`AEnemyBullet`を更新しました。これら2クラスの固定アセットパスを除き、BP側の設定を使用します。[設定項目・検証範囲・未移行箇所](docs/ASSET_SETTINGS.md)を参照してください。全クラスの移行と配布EXEの更新は未完了です。
+
 最新のWindows配布版は**2026年10月19日更新**です。狼男の両手の発光とSlash風の攻撃軌跡、キックの威力、ジャンプ高さを調整しました。[最新版のダウンロードと更新内容](https://github.com/prashant-rayamajhi/ProtectFromWolf/releases/tag/v2026.10.19-wolf-slash-jump)をご確認ください。
 
 銃を使う人型のFPS操作と、人狼へ変身した後のTPS近接戦闘を切り替えて戦うアクションゲームです。

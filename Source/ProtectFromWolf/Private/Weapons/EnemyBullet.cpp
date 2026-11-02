@@ -9,7 +9,6 @@
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
-#include "UObject/ConstructorHelpers.h"
 #include "TimerManager.h"
 #include "Sound/SoundBase.h"
 #include "Player/PlayerChara.h"
@@ -54,18 +53,10 @@ AEnemyBullet::AEnemyBullet() : m_damage(1.f)
 	m_beamTrail->SetupAttachment(m_bulletMesh);
 	m_beamTrail->SetAutoActivate(false);
 	m_beamTrail->SetAutoDestroy(false);
-	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> beamTrailFinder(
-		TEXT("/Game/MixedVFX/Particles/Projectiles/NS_Projectile_05.NS_Projectile_05"));
-	//軌跡Niagaraを読み込めた場合は白い仮Meshを隠してBeam表示へ切り替える
-	if (beamTrailFinder.Succeeded())
-	{
-		m_beamTrail->SetAsset(beamTrailFinder.Object);
-		m_beamTrail->SetRelativeScale3D(FVector(0.2f));
-		m_bulletMesh->SetVisibility(false, true);
-	}
-	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> impactFinder(
-		TEXT("/Game/MixedVFX/Particles/Projectiles/Hits/NS_Projectile_05_Hit.NS_Projectile_05_Hit"));
-	m_impactEffect = impactFinder.Object;
+
+	//弾道の素材はBPで指定し、旧Niagaraの自動読み込みを行わない
+	m_beamTrail->SetRelativeScale3D(FVector(0.2f));
+	m_bulletMesh->SetVisibility(false, true);
 	//敵弾の最大射程に必要な時間だけ寿命を確保して不要な弾道を早く消す処理
 	InitialLifeSpan = 0.65f;
 }
@@ -172,10 +163,11 @@ void AEnemyBullet::OnHit(UPrimitiveComponent *_hitComponent, AActor *_otherActor
 		const FVector normal = _hit.ImpactNormal.IsNearlyZero() ? -GetActorForwardVector() : _hit.ImpactNormal.GetSafeNormal();
 		UCombatTracer::ShowImpact(GetWorld(), _hit.ImpactPoint, normal, true);
 	}
-	//近未来型の命中音を読み込めた場合は接触位置から再生する
-	if (USoundBase *impactSound = LoadObject<USoundBase>(nullptr, TEXT("/Game/Audio/SciFi/SelectedForUnreal/SFX_BeamImpact.SFX_BeamImpact")))
+
+	//BPで選んだ着弾音だけを再生し、未設定なら音を生成しない
+	if (m_impactSound)
 	{
-		UGameplayStatics::PlaySoundAtLocation(this, impactSound, GetActorLocation(), 0.72f, FMath::FRandRange(0.92f, 1.02f));
+		UGameplayStatics::PlaySoundAtLocation(this, m_impactSound, GetActorLocation(), 0.72f, FMath::FRandRange(0.92f, 1.02f));
 	}
 	Destroy();
 }
